@@ -310,3 +310,29 @@ def test_llm_retries_rate_limits(monkeypatch):
     monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda r: next(replies)), **kw))
     assert asyncio.run(llm.complete_json("s", "u")) == {"ok": 1}
     assert waits == [1.5, 1.0]  # backoff, then the server's Retry-After
+
+
+def test_chat_survives_prose_and_failed_replies(client, jordan_brief_id, monkeypatch):
+    run_id, _ = run_council(client, jordan_brief_id)
+    calls = iter([None, RuntimeError("upstream down")])  # first speaker: prose reply; second: the call fails
+
+    def respond(request):
+        if "Close this chat turn" in json.loads(request.content)["messages"][0]["content"]:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "no json here"}}]})
+        err = next(calls)
+        if err:
+            raise err
+        return httpx.Response(200, json={"choices": [{"message": {"content": "AMD has no catalyst. SELL it!"}}]})
+
+    from app.services import llm
+
+    monkeypatch.setenv("NICRRON_API_KEY", "test")
+    real = httpx.AsyncClient
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(respond), **kw))
+    events = chat(client, run_id, "AMD is split: Leopold says hold, Jim says sell. Settle it.")
+    assert names(events)[-1] == "run.done"
+    replies = [d for e, d in events if e == "member.reply"]
+    assert [r["member"] for r in replies] == ["leopold", "cramer"]
+    assert replies[0]["text"] == "AMD has no catalyst. SELL it!"  # prose accepted as the reply
+    assert replies[1]["text"]  # canned fallback instead of a dead turn
+    assert next(d for e, d in events if e == "chat.closed")["suggestions"]
