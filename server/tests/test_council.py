@@ -1,6 +1,8 @@
 import json
+from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 
 from app.config import MEMBERS
 from tests.conftest import parse_sse, run_council
@@ -12,6 +14,19 @@ def names(events):
 
 def chat(client, run_id, text, **body):
     return parse_sse(client.post("/api/council/chat", json={"run_id": run_id, "text": text, **body}).text)
+
+
+@pytest.fixture
+def kb_results(monkeypatch):
+    from app.services import prism
+
+    async def search(agent_id, query, limit=3):
+        return [{"doc_name": f"{agent_id}.md", "content": f"KB research: {query}"}]
+
+    mock = AsyncMock(side_effect=search)
+    monkeypatch.setenv("COUNCIL_VERSION", "v2")
+    monkeypatch.setattr(prism, "kb_search", mock)
+    return mock
 
 
 def test_run_event_order_canned(client, jordan_brief_id):
@@ -39,7 +54,7 @@ def test_run_event_order_canned(client, jordan_brief_id):
     assert 1 <= len(chair["actions"]) <= 4 and 1 <= len(chair["suggestions"]) <= 3
 
 
-def test_member_stages_analyse_then_research_names_then_decide(client, jordan_brief_id):
+def test_member_stages_analyse_then_research_names_then_decide(client, jordan_brief_id, kb_results):
     _, events = run_council(client, jordan_brief_id)
     burry = [(e, d) for e, d in events if d.get("member") == "burry"]
     statuses = [d["status"] for e, d in burry if e == "member.status"]
@@ -160,7 +175,7 @@ def council_llm(messages, analysis=ANALYSIS, advice=ADVICE):
     return analysis if "Stage 1" in system else advice
 
 
-def test_run_with_nicrron_mocked(client, jordan_brief_id, monkeypatch):
+def test_run_with_nicrron_mocked(client, jordan_brief_id, monkeypatch, kb_results):
     mock_llm(monkeypatch, council_llm)
     _, events = run_council(client, jordan_brief_id)
     assert names(events)[-1] == "run.done"
@@ -175,6 +190,60 @@ def test_run_with_nicrron_mocked(client, jordan_brief_id, monkeypatch):
     rulings = {r["ticker"]: r for r in chair["positions"]}
     assert rulings["PLTR"]["signal"] == "SELL" and rulings["PLTR"]["conviction"] == "high"  # 5 of 5, from real calls
     assert chair["summary"].endswith("Parody council, not financial advice.")
+
+
+def test_kb_reaches_opening_and_chat_research(client, jordan_brief_id, monkeypatch, kb_results):
+    seen = []
+
+    def handler(messages):
+        seen.append(messages)
+        if "live chat" in messages[0]["content"]:
+            return {"text": "The retrieved research supports my view."}
+        return council_llm(messages)
+
+    mock_llm(monkeypatch, handler)
+    run_id, events = run_council(client, jordan_brief_id)
+    assert names(events)[-1] == "run.done"
+    for member in MEMBERS:
+        doc = f"council.{member}.md"
+        verdict = next(d for e, d in events if e == "member.verdict" and d["member"] == member)
+        sources = verdict["sources"]
+        assert all(s["title"] == doc and s["url"] == f"prism-kb://{doc}" for s in sources)
+        assert any(s["ticker"] is None for s in sources)
+        assert {s["ticker"] for s in sources if s["ticker"]} == set(verdict["names"])
+        for stage in ("Stage 1", "Stage 3"):
+            prompts = [m[1]["content"] for m in seen if stage in m[0]["content"] and f"prism-kb://{doc}" in m[1]["content"]]
+            assert len(prompts) == 1
+            for source in sources:
+                if (stage == "Stage 1") == (source["ticker"] is None):
+                    assert source["quote"] in prompts[0]
+
+    text = "Burry, what is the latest PLTR news?"
+    events = chat(client, run_id, text)
+    assert names(events)[-1] == "run.done"
+    kb_results.assert_any_await("council.burry", text)
+    reply = next(d for e, d in events if e == "member.reply")
+    assert any(s["quote"] == f"KB research: {text}" and s["ticker"] == "PLTR" for s in reply["sources"])
+    assert f"KB research: {text}" in seen[-1][1]["content"]
+
+
+def test_v1_skips_kb_retrieval(client, jordan_brief_id, monkeypatch, kb_results):
+    monkeypatch.setenv("COUNCIL_VERSION", "v1")
+    run_id, events = run_council(client, jordan_brief_id)
+    events += chat(client, run_id, "Burry, latest PLTR news?")
+    kb_results.assert_not_awaited()
+    assert all(not d["sources"] for e, d in events if e in ("member.verdict", "member.reply"))
+    assert "member.source" not in names(events)
+
+
+def test_unconfigured_retrieval_has_no_stub_sources(client, jordan_brief_id, monkeypatch):
+    monkeypatch.setenv("COUNCIL_VERSION", "v2")
+    monkeypatch.delenv("ANCHOR_API_KEY", raising=False)
+    run_id, events = run_council(client, jordan_brief_id)
+    events += chat(client, run_id, "Burry, latest PLTR news?")
+    assert names(events).count("run.done") == 2
+    assert all(not d["sources"] for e, d in events if e in ("member.verdict", "member.reply"))
+    assert "member.source" not in names(events)
 
 
 def test_invented_number_is_retried_then_stripped(client, jordan_brief_id, monkeypatch):

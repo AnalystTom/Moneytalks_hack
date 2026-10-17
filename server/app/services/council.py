@@ -8,9 +8,9 @@ import uuid
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
-from app.config import CHAIR, COUNCIL_DIR, MEMBERS
+from app.config import CHAIR, COUNCIL_DIR, MEMBERS, council_version
 from app.models import Advice, Analysis, Assignment, Chair, PositionCall, Source, Verdict
-from app.services import anchor, coordinator, llm, prism
+from app.services import coordinator, llm, prism
 
 log = logging.getLogger(__name__)
 
@@ -154,8 +154,11 @@ async def _plan(run_id: str, brief: dict) -> dict[str, Assignment]:
 
 async def _search(member: str, queries: list[str], emit, ticker: str | None = None, limit: int = 2) -> list[Source]:
     found: dict[tuple[str, str], Source] = {}
-    for results in await asyncio.gather(*(anchor.search(member, q) for q in queries)):
-        found.update({(s.url, s.quote): s.model_copy(update={"ticker": ticker}) for s in results if (s.url, s.quote) not in found})
+    results = [] if council_version() == "v1" else await asyncio.gather(*(prism.kb_search(f"council.{member}", q) for q in queries))
+    for chunks in results:
+        for r in chunks:
+            s = Source(title=r["doc_name"], url=f"prism-kb://{r['doc_name']}", quote=r["content"][:1200], ticker=ticker)
+            found.setdefault((s.url, s.quote), s)
     out = list(found.values())[:limit]
     for s in out:
         await emit("member.source", {"member": member, "title": s.title, "url": s.url, "ticker": ticker})
