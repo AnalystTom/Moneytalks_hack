@@ -12,5 +12,7 @@
   "durable_objects": { "bindings": [{ "name": "COUNCIL", "class_name": "Council" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Council"] }],
   "d1_databases": [{ "binding": "DB", "database_name": "council", "database_id": "d330dcca-dbdb-4590-9b1b-e4630f0a2567" }],
-  "rules": [{ "type": "Text", "globs": ["council/*.md"], "fallthrough": true }]
+  "find_additional_modules": true,
+  "preserve_file_names": true,
+  "rules": [{ "type": "Text", "globs": ["agents/personas/*.md", "agents/orchestrator.md", "agents/skill.md", "data/specialist.csv"], "fallthrough": true }]
 }

@@ -1,7 +1,6 @@
 # server - FastAPI backend (see [spec](../data/spec.md))
 
-Implements the spec's server-to-scene contract. Without `NICRRON_API_KEY`, runs and follow-ups emit an explicit `run.error`. Plaid and market data are stubs behind
-`app/services/`; PRISM tracing requires both `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
+Implements the spec's server-to-scene contract. Without `NICRRON_API_KEY`, runs and follow-ups emit an explicit `run.error`. Market values, returns and bank balances are explicitly unavailable; ingestion stores only submitted holdings and profile data. PRISM tracing requires both `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
 
 ## Agents
 
@@ -20,7 +19,7 @@ An unusable assignment leaves workers to research without a personalised assignm
 emits `run.error` instead of a computed replacement. Speech is requested through ElevenLabs when configured.
 Follow-ups give the named worker its earlier headline and reasons, plus access to the same brief through tools.
 **Adding a council member requires a file in `agents/personas/` and frontend support for its id and presentation.** Roast mode only changes tone. Client holdings and profile come only from their uploaded brief. The specialist sheet comes from
-`../data/specialist.csv` (override the folder with `DATA_DIR`).
+`data/specialist.csv` inside `server/` (override the folder with `DATA_DIR`).
 
 PRISM: one trace per agent (the orchestrator and each worker), all with `session_id` = the run id; spans are
 the workers, every LLM call and every tool call (including ElevenLabs). The ids are in `run.done`
@@ -57,12 +56,12 @@ npx wrangler login          # once
 
 `set-secrets.sh` parses dotenv assignments, including `export`, quotes, inline comments and variable interpolation.
 It rejects malformed assignments before uploading and selects nonempty values with `NICRRON_`, `PRISMTRACE_`,
-`ELEVENLABS_`, `ANCHOR_`, `PLAID_` or `CORS_` prefixes. Omitted or empty values do not delete existing secrets.
+`ELEVENLABS_`, `ANCHOR_`, `PLAID_` or `CORS_` prefixes, plus the exact `DATA_DIR` setting. Omitted or empty values do not delete existing secrets.
 
 Public URL: https://council.thomasmann2001.workers.dev. `deploy.sh` is the redeploy; secrets persist across deploys.
 `worker.py` copies the names in `ENV_NAMES` from the Worker env into `os.environ` before importing the app,
 so settings such as CORS are available during app construction; add new consumed env names there.
-Non-Python data the app reads at runtime (`council/*.md`) is bundled via `rules` in `wrangler.jsonc`.
+Non-Python data the app reads at runtime (`agents/personas/*.md`, `agents/orchestrator.md`, `agents/skill.md` and `data/specialist.csv`) is bundled with preserved paths via `rules` in `wrangler.jsonc`. Custom data directories must also be bundled at the configured path.
 
 ### D1 database
 
@@ -82,8 +81,8 @@ Copy `../.env.example` to `../.env`. `NICRRON_API_KEY` is required for council a
 | `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | key and project id enable tracing; host defaults to `https://prism.blockconvey.com` |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY` | turns on the workers' `web_search` tool (Anchor) |
-| `DATA_DIR` | folder with `specialist.csv`; default `../data` |
-| `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the Plaid stub; unused today |
+| `DATA_DIR` | folder with `specialist.csv`; default `server/data` |
+| `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for a future Plaid integration; unused today |
 
 ## Endpoints
 
@@ -94,7 +93,7 @@ curl localhost:8000/api/health
 printf 'ticker,shares,cost_basis\nVOO,20,714.29\n' > portfolio.csv
 printf '# Alex\n10-year horizon, moderate risk\n' > persona.md
 curl -F portfolio=@portfolio.csv -F persona=@persona.md -F plaid=true localhost:8000/api/ingest
-# -> {"brief_id":"...","summary":"$10,000 in VOO, -30%; $4,200 cash; 10-year horizon, moderate risk"}
+# -> {"brief_id":"...","summary":"Holdings: VOO; Market value and returns unavailable; Bank balances unavailable; 10-year horizon, moderate risk"}
 
 # council run (SSE); add "roast": true for roast mode
 curl -N -X POST localhost:8000/api/council/run -H 'content-type: application/json' \

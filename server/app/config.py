@@ -3,7 +3,7 @@ from pathlib import Path
 
 SERVER_DIR = Path(__file__).resolve().parent.parent
 AGENTS_DIR = SERVER_DIR / "agents"
-DATA_DIR = Path(os.environ.get("DATA_DIR") or SERVER_DIR.parent / "data")  # demo inputs: portfolio.json, PERSONA.md, specialist.csv
+DATA_DIR = Path(os.environ.get("DATA_DIR") or SERVER_DIR / "data")
 DEFAULT_MODEL = "anthropic/claude-opus-5-5"  # Claude Opus 5.5 in Nicrron's model list
 
 

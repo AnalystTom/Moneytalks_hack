@@ -3,8 +3,6 @@ import io
 import json
 import uuid
 
-from app.services import market, plaid
-
 BRIEFS: dict[str, dict] = {}  # shortcut: in-memory, lost on restart; move to D1 with the Cloudflare port
 
 
@@ -27,23 +25,18 @@ def parse_holdings(filename: str, raw: bytes) -> list[dict]:
 
 
 async def build_brief(holdings: list[dict], persona: str, use_plaid: bool) -> tuple[str, str]:
-    """Merge the three sources into a stored brief; returns (brief_id, one-line summary)."""
+    """Store submitted holdings and profile; returns (brief_id, one-line summary)."""
     tickers = [h["ticker"] for h in holdings]
-    last = await market.prices(tickers, {h["ticker"]: h["cost_basis"] for h in holdings})
-    value = sum(h["shares"] * last[h["ticker"]] for h in holdings)
-    cost = sum(h["shares"] * h["cost_basis"] for h in holdings)
-    pnl = (value - cost) / cost * 100 if cost else 0.0
-    bank = await plaid.sandbox_balances() if use_plaid else None
-    parts = [f"${value:,.0f} in {', '.join(tickers)}, {pnl:+.0f}%"]
-    if bank:
-        parts.append(f"${bank['cash']:,.0f} cash")
+    parts = [f"Holdings: {', '.join(tickers)}", "Market value and returns unavailable"]
+    if use_plaid:
+        parts.append("Bank balances unavailable")
     profile = next((ln.strip() for ln in persona.splitlines() if ln.strip() and not ln.startswith("#")), "")
     if profile:
         parts.append(profile[:80])
     summary = "; ".join(parts)
     brief_id = uuid.uuid4().hex
     BRIEFS[brief_id] = {
-        "holdings": holdings, "prices": last, "value": value, "pnl_pct": pnl, "bank": bank,
+        "holdings": holdings, "prices": None, "value": None, "pnl_pct": None, "bank": None,
         "persona": persona, "summary": summary,
     }
     return brief_id, summary

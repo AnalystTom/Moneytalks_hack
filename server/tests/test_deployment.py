@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
@@ -15,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("origin", [None, "https://council.example"])
-async def test_worker_initializes_configuration(monkeypatch, origin):
+@pytest.mark.parametrize("project", [None, "project-id"])
+async def test_worker_initializes_configuration(monkeypatch, tmp_path, origin, project):
     monkeypatch.delitem(sys.modules, "app.main", raising=False)
     monkeypatch.setattr(os, "environ", {})
     workers = ModuleType("workers")
@@ -32,13 +34,16 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
     monkeypatch.setitem(sys.modules, "asgi", asgi)
     worker = SimpleNamespace(**runpy.run_path(str(ROOT / "server" / "worker.py")))
     bindings = {
+        "DATA_DIR": str(tmp_path),
         "NICRRON_API_KEY": "llm-key",
         "PRISMTRACE_API_KEY": "trace-key",
         "ELEVENLABS_API_KEY": "voice-key",
         "ELEVENLABS_MODEL": "custom-model",
         **{f"ELEVENLABS_VOICE_{member.upper()}": f"voice-{member}"
-           for member in ("buffett", "cramer", "burry", "leopold")},
+           for member in ("buffett", "cramer", "burry", "leopold", "dalio")},
     }
+    if project:
+        bindings["PRISMTRACE_PROJECT_ID"] = project
     if origin:
         bindings["CORS_ORIGINS"] = origin
     council = worker.Council()
@@ -49,9 +54,16 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
 
     response = await request("GET", "/api/health")
     assert response.status_code == 200
-    assert response.json()["llm"] == "nicrron"
+    assert response.json()["llm"] == "anthropic/claude-opus-5-5"
     assert response.json()["voice"] is True
-    assert response.json()["prism"] is True
+    assert response.json()["prism"] is bool(project)
+    (tmp_path / "specialist.csv").write_text("Persona,Style\nMichael Burry,Custom\n")
+    row = subprocess.run([
+        sys.executable, "-c",
+        "import asyncio, json; from app.services import tools, personas; "
+        "print(json.dumps(asyncio.run(tools.call('specialist_row', {}, {}, personas.load()['burry']))))",
+    ], cwd=ROOT / "server", env=dict(os.environ), capture_output=True, text=True, check=True)
+    assert json.loads(row.stdout) == {"Persona": "Michael Burry", "Style": "Custom"}
     for candidate in ("https://council.example", "https://other.example"):
         response = await request("OPTIONS", "/api/health", headers={
             "Origin": candidate, "Access-Control-Request-Method": "GET",
@@ -71,7 +83,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(
         transport=httpx.MockTransport(speak), **kwargs,
     ))
-    for member in ("buffett", "cramer", "burry", "leopold"):
+    for member in ("buffett", "cramer", "burry", "leopold", "dalio"):
         for method in ("GET", "POST"):
             payload = {"member": member, "text": "hello"}
             response = await request(method, "/api/voice/speak", **{
@@ -81,6 +93,42 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
             assert calls[-1].url.path.endswith(f"/voice-{member}")
             assert calls[-1].headers["xi-api-key"] == "voice-key"
             assert json.loads(calls[-1].content)["model_id"] == "custom-model"
+
+
+def test_runtime_readers_load_assets_selected_by_module_rules(tmp_path):
+    server = ROOT / "server"
+    config = json.loads((server / "wrangler.jsonc").read_text())
+    assert config["find_additional_modules"] is True
+    assert config["preserve_file_names"] is True
+    bundle = tmp_path / "bundle"
+    shutil.copytree(server / "app", bundle / "app", ignore=shutil.ignore_patterns("__pycache__"))
+    base = server / Path(config["main"]).parent
+    for rule in config["rules"]:
+        if rule["type"] == "Text":
+            for pattern in rule["globs"]:
+                for asset in base.glob(pattern):
+                    target = bundle / asset.relative_to(base)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(asset, target)
+    environment = {**os.environ, "PYTHONPATH": str(bundle)}
+    environment.pop("DATA_DIR", None)
+    result = subprocess.run([sys.executable, "-c", """
+import asyncio, json
+from app.services import personas, tools
+async def main():
+    members = personas.load()
+    rows = {m: await tools.call('specialist_row', {}, {}, p) for m, p in members.items()}
+    print(json.dumps({'members': list(members), 'chair': personas.chair().member,
+                      'prompts': [bool(personas.prompt(n)) for n in ('orchestrator', 'skill')],
+                      'rows': rows}))
+asyncio.run(main())
+"""], cwd=bundle, env=environment, capture_output=True, text=True, check=True)
+    runtime = json.loads(result.stdout)
+    assert set(runtime["members"]) == {"buffett", "burry", "cramer", "dalio", "leopold"}
+    assert runtime["chair"] == "buffett" and all(runtime["prompts"])
+    assert {row["Persona"] for row in runtime["rows"].values()} == {
+        "Warren Buffett", "Michael Burry", "Jim Cramer", "Ray Dalio", "Leopold Aschenbrenner",
+    }
 
 
 @pytest.fixture
@@ -119,6 +167,8 @@ PRISMTRACE_PROJECT_ID='project # one' # comment
 PRISMTRACE_HOST="https://example.test/#fragment"
 ELEVENLABS_MODEL="custom\\nmodel"
 ELEVENLABS_VOICE_BURRY="${NICRRON_API_KEY}-voice"
+ELEVENLABS_VOICE_DALIO=dalio-voice
+DATA_DIR=data
 CORS_ORIGINS = "https://one.example,https://two.example"
 PLAID_CLIENT_ID="line one
 line two"
@@ -134,6 +184,8 @@ UNRELATED_KEY=ignored
         "PRISMTRACE_HOST": "https://example.test/#fragment",
         "ELEVENLABS_MODEL": "custom\nmodel",
         "ELEVENLABS_VOICE_BURRY": "abc-voice",
+        "ELEVENLABS_VOICE_DALIO": "dalio-voice",
+        "DATA_DIR": "data",
         "CORS_ORIGINS": "https://one.example,https://two.example",
         "PLAID_CLIENT_ID": "line one\nline two",
         "ANCHOR_API_KEY": "abc#literal",
