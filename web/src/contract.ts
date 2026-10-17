@@ -44,8 +44,7 @@ export type NameRuling = {
 };
 export type Verdict = {
   member: Member;
-  signal: Signal;
-  confidence: number;
+  signal?: Signal;
   headline: string;
   reasons: string[];
   sources: Source[];
@@ -55,7 +54,7 @@ export type Verdict = {
   advice: { action: string; why?: string }[];
 };
 export type Chair = {
-  overall_signal: Signal;
+  overall_signal?: Signal;
   consensus: string;
   dissent: string[];
   summary: string;
@@ -76,14 +75,13 @@ export type CouncilEvent =
   | { event: "run.done"; data: { run_id: string } }
   | { event: "run.error"; data: { message: string } };
 
-const conviction = { low: 0.4, mid: 0.65, high: 0.9 };
 // Majority signal; ties go to the call on the first (top-weighted) name.
-function majority(signals: Signal[]): Signal {
+function majority(signals: Signal[]): Signal | undefined {
   const counts = new Map<Signal, number>();
   for (const signal of signals)
     counts.set(signal, (counts.get(signal) || 0) + 1);
   const top = Math.max(0, ...counts.values());
-  return signals.find((signal) => counts.get(signal) === top) || "HOLD";
+  return signals.find((signal) => counts.get(signal) === top);
 }
 
 // Maps the server's five-member shapes onto the boardroom's view model.
@@ -92,10 +90,6 @@ export function toVerdict(raw: Partial<Verdict>): Verdict {
   return {
     member: raw.member as Member,
     signal: majority(positions.map((call) => call.signal)),
-    confidence: positions.length
-      ? positions.reduce((sum, call) => sum + conviction[call.conviction], 0) /
-        positions.length
-      : 0.5,
     headline: raw.headline || "",
     analysis: raw.analysis || "",
     reasons: raw.reasons || [],

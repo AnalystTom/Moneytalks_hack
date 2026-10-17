@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { members, streamCouncil } from "./contract";
-import type { Member, Verdict } from "./contract";
+import { members, streamCouncil, toChair, toVerdict } from "./contract";
+import type { Member, Signal } from "./contract";
 
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], next: 0 }));
 vi.mock("react", async (importOriginal) => {
@@ -421,9 +421,58 @@ describe("spoken answers", () => {
   );
 });
 
+it.each(["low", "mid", "high", undefined] as const)(
+  "renders supplied conviction or pending calls (%s)",
+  async (conviction) => {
+    vi.useFakeTimers();
+    const positions = conviction
+      ? [
+          {
+            ticker: "NVDA",
+            signal: "BUY" as const,
+            conviction,
+            rationale: "Returned rationale",
+          },
+        ]
+      : [];
+    vi.mocked(streamCouncil).mockImplementationOnce(
+      async (_, __, ___, receive) => {
+        await receive({ event: "run.started", data: { run_id: "parent" } });
+        await receive({
+          event: "member.verdict",
+          data: toVerdict({ member: "buffett", positions }),
+        });
+        await receive({
+          event: "chair.summary",
+          data: toChair({
+            positions: positions.map((call) => ({
+              ...call,
+              consensus: "Returned consensus",
+            })),
+          }),
+        });
+        await receive({ event: "run.done", data: { run_id: "parent" } });
+      },
+    );
+    submit("brief-form");
+    await vi.advanceTimersByTimeAsync(5000);
+    hooks.next = 0;
+    const html = renderToStaticMarkup(App());
+    expect(html).not.toMatch(/\d+% avg\. conviction/);
+    if (conviction) {
+      expect(html).toContain(`${conviction} conviction`);
+      expect(html).toContain(`NVDA BUY · ${conviction}`);
+    } else {
+      expect(html).toContain("Pending");
+      expect(html).toContain("No calls returned.");
+      expect(html).not.toContain("HOLD");
+    }
+  },
+);
+
 it("shows the chair ruling and renders chat turns from the council", async () => {
   vi.useFakeTimers();
-  const call = (ticker: string, signal: Verdict["signal"]) => ({
+  const call = (ticker: string, signal: Signal) => ({
     ticker,
     signal,
     conviction: "high" as const,
@@ -439,7 +488,6 @@ it("shows the chair ruling and renders chat turns from the council", async () =>
             member,
             signal: "SELL",
             headline: `Returned ${member} individual verdict`,
-            confidence: 0.9,
             reasons: ["Returned individual reason"],
             sources: [],
             tickers: ["NVDA"],

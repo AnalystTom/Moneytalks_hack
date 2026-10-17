@@ -137,8 +137,22 @@ describe("council event mapping", () => {
         positions: [call("A", "SELL"), call("B", "BUY")],
       }).signal,
     ).toBe("SELL");
-    expect(toVerdict({ member: "burry" }).signal).toBe("HOLD");
   });
+  it.each([undefined, []])("keeps absent calls pending (%j)", (positions) => {
+    expect(toVerdict({ member: "burry", positions }).signal).toBeUndefined();
+    expect(toChair({ positions }).overall_signal).toBeUndefined();
+  });
+  it.each(["low", "mid", "high"] as const)(
+    "preserves supplied %s conviction without numeric confidence",
+    (conviction) => {
+      const positions = [{ ...call("A", "BUY"), conviction }];
+      const verdict = toVerdict({ member: "burry", positions });
+      expect(verdict.positions).toEqual(positions);
+      expect(verdict).not.toHaveProperty("confidence");
+      const rulings = [{ ...positions[0], consensus: "Returned consensus" }];
+      expect(toChair({ positions: rulings }).positions).toEqual(rulings);
+    },
+  );
   it("derives the ruling signal from the per-name rulings", () => {
     const name = (signal: "BUY" | "HOLD" | "SELL") => ({
       ticker: "X",

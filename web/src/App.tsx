@@ -49,15 +49,15 @@ function VerdictCard({
     <article className="verdict-card">
       <div className="card-top">
         <span>{members[verdict.member].name}</span>
-        <span className={`signal ${verdict.signal.toLowerCase()}`}>
-          {verdict.signal}
+        <span className={`signal ${verdict.signal?.toLowerCase() || ""}`}>
+          {verdict.signal || "Pending"}
         </span>
       </div>
       <h3>{verdict.headline}</h3>
-      <p className="muted">
-        {Math.round(verdict.confidence * 100)}% avg. conviction
-        {verdict.tickers.length ? ` · ${verdict.tickers.join(", ")}` : ""}
-      </p>
+      {verdict.tickers.length > 0 && (
+        <p className="muted">{verdict.tickers.join(", ")}</p>
+      )}
+      {!verdict.positions.length && <p className="muted">No calls returned.</p>}
       <details open={open || undefined}>
         <summary>
           View more <span>↗</span>
@@ -110,8 +110,8 @@ function ChairRuling({
       <p className="eyebrow">THE CHAIR</p>
       <div className="card-top">
         <h2>Council ruling</h2>
-        <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
-          {chair.overall_signal}
+        <span className={`signal ${chair.overall_signal?.toLowerCase() || ""}`}>
+          {chair.overall_signal || "Pending"}
         </span>
       </div>
       <p>{chair.summary}</p>
@@ -686,9 +686,9 @@ export default function App() {
                     <strong>{members[member].name}</strong>
                     <small>{members[member].role}</small>
                   </span>
-                  {signal && (
-                    <b className={`signal ${signal.toLowerCase()}`}>{signal}</b>
-                  )}
+                  <b className={`signal ${signal?.toLowerCase() || ""}`}>
+                    {signal || "Pending"}
+                  </b>
                 </button>
               );
             })}

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import Boardroom from "./Boardroom";
-import { members } from "./contract";
+import { members, toChair, toVerdict } from "./contract";
 import type { Member, Verdict } from "./contract";
 
 type ElementProps = {
@@ -29,7 +29,6 @@ const verdict = (
   member,
   signal,
   headline,
-  confidence: 0.8,
   reasons: [],
   sources: [],
   tickers: [],
@@ -39,6 +38,20 @@ const verdict = (
 });
 
 describe("cartoon boardroom", () => {
+  it("keeps returned members and rulings with no calls pending", () => {
+    const html = renderToStaticMarkup(
+      <Boardroom
+        statuses={{}}
+        verdicts={{ buffett: toVerdict({ member: "buffett", positions: [] }) }}
+        sources={{}}
+        chair={toChair({ positions: [] })}
+        onSelect={() => {}}
+      />,
+    );
+    expect(html.match(/aria-label="Pending"/g)).toHaveLength(6);
+    expect(html).not.toContain("HOLD");
+  });
+
   it("renders all five empty seats with pending icons and the generated assets", () => {
     const html = renderToStaticMarkup(
       <Boardroom
