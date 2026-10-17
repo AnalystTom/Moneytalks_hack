@@ -31,11 +31,12 @@ Answers are cached per demo user + question so the stage demo survives a bad net
 
 ## v0 stack
 
-- TypeScript on Cloudflare: one Worker (API + static UI assets), D1 (demo users, persona profiles, runs, cached research).
+- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 (demo users, persona profiles, runs, cached research). If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
+- Frontend: React (Vite + TypeScript), served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Web search: Anchor.
 - Financial-analysis skills: built by KJ; personas call them through one shared tool interface (stubbed until KJ's piece lands).
-- PRISM (no JS SDK - plain HTTP from the Worker):
+- PRISM (plain HTTP from the backend; the `prismtrace-sdk` Python package does not run inside Workers):
   - Traces: `POST https://prism.blockconvey.com/api/traces`, header `X-PRISMtrace-Key`, one session id per council run.
   - Knowledge Base: each persona is a PRISM agent with its own documents (e.g. Berkshire letters); retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
 
