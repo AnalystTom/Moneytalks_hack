@@ -73,6 +73,39 @@ describe("source links", () => {
   });
 });
 describe("POST SSE", () => {
+  it("accepts all event types for the fifth configured worker", async () => {
+    const prior = globalThis.fetch;
+    globalThis.fetch = async () =>
+      stream([
+        'event: run.started\ndata: {"run_id":"five"}\n\n',
+        'event: member.status\ndata: {"member":"dalio","status":"researching"}\n\n',
+        'event: member.source\ndata: {"member":"dalio","title":"Report","url":"https://issuer.test"}\n\n',
+        'event: member.verdict\ndata: {"member":"dalio","signal":"HOLD","confidence":0.5,"headline":"h","reasons":[],"sources":[],"tickers":[]}\n\n',
+        'event: member.audio\ndata: {"member":"dalio","audio_url":"/api/voice/speak"}\n\n',
+        'event: run.done\ndata: {"run_id":"five"}\n\n',
+      ]);
+    const received: string[] = [];
+    try {
+      await streamCouncil(
+        "/api/council/run",
+        {},
+        new AbortController().signal,
+        async (event) => {
+          received.push(event.event);
+        },
+      );
+    } finally {
+      globalThis.fetch = prior;
+    }
+    expect(received).toEqual([
+      "run.started",
+      "member.status",
+      "member.source",
+      "member.verdict",
+      "member.audio",
+      "run.done",
+    ]);
+  });
   it("handles frames split across chunks and CRLF boundaries in order", async () => {
     const prior = globalThis.fetch;
     globalThis.fetch = async () =>

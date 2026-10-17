@@ -1,7 +1,6 @@
 # server - FastAPI backend (see [spec](../data/spec.md))
 
-Implements the spec's server-to-scene contract. With no `NICRRON_API_KEY` it streams deterministic canned
-events, so the frontend can build against it with no keys. Plaid and market data are stubs behind
+Implements the spec's server-to-scene contract. Without `NICRRON_API_KEY`, runs and follow-ups emit an explicit `run.error`. Plaid and market data are stubs behind
 `app/services/`; PRISM tracing no-ops without `PRISMTRACE_API_KEY`.
 
 ## Agents
@@ -18,8 +17,8 @@ A run: the orchestrator (Claude Opus 5.5 via Nicrron) writes a research assignme
 persona file then runs in parallel, each with its own message context and its own tool-calling loop, and
 returns a verdict (`signal`, `confidence`, `headline`, `reasons`, `sources`, `tickers`, plus a short speech-bubble
 `line`); the chair rules (`chair.summary`); each line is spoken in ElevenLabs. **Adding a council member is
-adding a file in `agents/personas/`.** Roast mode only changes tone. Tool data comes from `../data/`
-(`portfolio.json`, `PERSONA.md`, `specialist.csv`; override the folder with `DATA_DIR`).
+adding a file in `agents/personas/` and accepting its id in the frontend contract.** Roast mode only changes tone. Client holdings and profile come only from their uploaded brief. The specialist sheet comes from
+`../data/specialist.csv` (override the folder with `DATA_DIR`).
 
 PRISM: one trace per agent (the orchestrator and each worker), all with `session_id` = the run id; spans are
 the workers, every LLM call and every tool call (including ElevenLabs). The ids are in `run.done`
@@ -68,17 +67,17 @@ the live database with `npx wrangler d1 execute council --remote --command "SELE
 
 ## Env names
 
-Copy `../.env.example` to `../.env`. All optional.
+Copy `../.env.example` to `../.env`. `NICRRON_API_KEY` is required for council answers.
 
 | name | effect |
 |---|---|
-| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); unset = canned events. The model is `anthropic/claude-opus-5-5` unless `NICRRON_MODEL` names another (`nicrron/auto` counts as unset) |
-| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_CRAMER` / `_BURRY` / `_LEOPOLD` | speech; the key alone is enough (voices are matched by name), the voice ids override |
+| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); unset = explicit unavailable error. The model is `anthropic/claude-opus-5-5` unless `NICRRON_MODEL` names another (`nicrron/auto` counts as unset) |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_CRAMER` / `_BURRY` / `_LEOPOLD` / `_DALIO` | speech; the key alone is enough (voices are matched by name), the voice ids override |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
 | `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM trace + span per member |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY` | turns on the workers' `web_search` tool (Anchor) |
-| `DATA_DIR` | folder with `portfolio.json`, `PERSONA.md`, `specialist.csv`; default `../data` |
+| `DATA_DIR` | folder with `specialist.csv`; default `../data` |
 | `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the Plaid stub; unused today |
 
 ## Endpoints
@@ -105,7 +104,7 @@ curl -X POST localhost:8000/api/voice/speak -H 'content-type: application/json' 
   -d '{"member":"buffett","text":"Be fearful when others are greedy."}' -o buffett.mp3
 ```
 
-Events and payloads are the spec's table. Order: `run.started`; the three other members in parallel
+Events and payloads are the spec's table. Order: `run.started`; the four other members in parallel
 (`member.status` researching -> `member.source` -> thinking -> `member.verdict`); then Warren's own
 verdict; `chair.summary`; a `member.status` speaking -> `member.audio` -> done triple per member
 (`member.audio.audio_url` is `GET /api/voice/speak?member=&text=`, playable in an `<audio>` tag);
@@ -115,6 +114,6 @@ PRISM `trace_id` and per-member `traces`.
 ## Known limits
 
 For storage limits, see [Deploy (Cloudflare)](#deploy-cloudflare). No answer caching or replay yet;
-canned `member.audio` URLs 503 without an ElevenLabs key. Without `ANCHOR_API_KEY` there is no web search, so
+`member.audio` URLs 503 without an ElevenLabs key. Without `ANCHOR_API_KEY` there is no web search, so
 verdict sources are data citations with no URL (the UI shows only linked sources). The Anchor call is untested
 against the live service. A `--env-file` run needs `python-dotenv` (a dependency now).

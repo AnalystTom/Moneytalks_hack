@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 KEYS = ["NICRRON_API_KEY", "NICRRON_MODEL", "PRISMTRACE_API_KEY", "PRISMTRACE_PROJECT_ID", "ANCHOR_API_KEY", "ELEVENLABS_API_KEY"] + [
-    f"ELEVENLABS_VOICE_{m}" for m in ("BUFFETT", "CRAMER", "BURRY", "LEOPOLD")
+    f"ELEVENLABS_VOICE_{m}" for m in ("BUFFETT", "CRAMER", "BURRY", "LEOPOLD", "DALIO")
 ]
 PORTFOLIO = b"ticker,shares,cost_basis\nVOO,20,714.29\n"
 PERSONA = b"# Alex\n10-year horizon, moderate risk\n"

@@ -6,16 +6,14 @@ return it, you do not have it.
 
 ## portfolio_lookup
 
-Holdings of the client you are advising, from the portfolio snapshot (`data/portfolio.json`) merged with the
-holdings they submitted. Per position: ticker, name, sector, shares, cost basis, current price, weight %,
-P&L %, beta, dividend yield, 52-week high/low. Also returns the account summary (cash, invested %, portfolio
-beta, winners/losers).
+Holdings submitted by the client: ticker, shares and per-share cost basis, plus their brief summary and
+bank data when available. Account details and unsubmitted position fields are unavailable.
 
 - `ticker` (optional): one symbol. Omit it for the whole portfolio.
 
 ## persona_profile
 
-The client's own profile (`data/PERSONA.md`, or the `persona.md` they uploaded): age, goals, horizon, risk
+The client's uploaded profile: age, goals, horizon, risk
 tolerance, where their money is held. Advice that ignores it is wrong advice.
 
 - no arguments.

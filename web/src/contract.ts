@@ -8,6 +8,7 @@ export const members = {
     role: "The AI optimist",
   },
   burry: { name: "Michael Burry", role: "The contrarian" },
+  dalio: { name: "Ray Dalio", role: "Global macro" },
   cramer: { name: "Jim Cramer", role: "The momentum man" },
 } as const;
 export type Member = keyof typeof members;

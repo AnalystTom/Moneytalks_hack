@@ -17,7 +17,7 @@ OUTPUT_CONTRACT = (
     '"tickers":["symbols you rule on"],"sources":[{"title","url","quote"}],'
     '"line":"your speech-bubble line, at most 25 words, in your own voice"}. '
     "Cite only what your tools returned: web sources with their real URL and a quote the page contained; "
-    "for data from the portfolio, profile or specialist sheet use a source with an empty url and the figure as the quote. "
+    "for data from the portfolio, profile or specialist sheet use the tool name as title, an empty url, and an exact excerpt of the returned JSON as quote. "
     "Never invent a number, quote or URL."
 )
 
@@ -38,9 +38,12 @@ def task_prompt(brief: dict, question: str, roast: bool, assignment: str, earlie
     return "\n".join(parts)
 
 
-def _clean(verdict: Verdict, seen_urls: set[str]) -> Verdict:
-    """Drop cited web URLs that no tool returned: a worker may only cite what it was given."""
-    verdict.sources = [s for s in verdict.sources if not s.url or s.url in seen_urls]
+def _clean(verdict: Verdict, evidence: list[Source]) -> Verdict:
+    verdict.sources = [s for s in verdict.sources if s.quote.strip() and any(
+        s.title == e.title and s.url == e.url and s.quote in e.quote for e in evidence
+    )]
+    if not verdict.sources:
+        raise ValueError("A verdict must cite evidence returned by a successful tool call")
     return verdict
 
 
@@ -50,7 +53,7 @@ async def run(persona: personas.Persona, brief: dict, question: str, roast: bool
         {"role": "system", "content": system_prompt(persona)},
         {"role": "user", "content": task_prompt(brief, question, roast, assignment, earlier)},
     ]
-    seen_urls: set[str] = set()
+    evidence: list[Source] = []
     with trace.span(f"worker.{persona.member}", "agent", messages[1]["content"]) as root:
         await emit("member.status", {"member": persona.member, "status": "researching"})
         for step in range(MAX_STEPS + 2):
@@ -65,11 +68,11 @@ async def run(persona: personas.Persona, brief: dict, question: str, roast: bool
             if calls := reply.get("tool_calls"):
                 if step >= MAX_STEPS:
                     raise ValueError(f"{persona.member} kept calling tools past its research budget")
-                await asyncio.gather(*(_tool(c, persona, brief, trace, root, messages, seen_urls, emit) for c in calls))
+                await asyncio.gather(*(_tool(c, persona, brief, trace, root, messages, evidence, emit) for c in calls))
                 await emit("member.status", {"member": persona.member, "status": "thinking"})
                 continue
             try:
-                verdict = _clean(Verdict(**llm.extract_json(reply.get("content") or "")), seen_urls)
+                verdict = _clean(Verdict(**llm.extract_json(reply.get("content") or "")), evidence)
             except (ValueError, ValidationError) as e:
                 if step >= MAX_STEPS + 1:
                     raise ValueError(f"{persona.member} returned no valid verdict: {e}") from e
@@ -80,7 +83,7 @@ async def run(persona: personas.Persona, brief: dict, question: str, roast: bool
     raise ValueError(f"{persona.member} did not finish")
 
 
-async def _tool(call: dict, persona, brief: dict, trace: Trace, root, messages: list, seen_urls: set[str], emit) -> None:
+async def _tool(call: dict, persona, brief: dict, trace: Trace, root, messages: list, evidence: list[Source], emit) -> None:
     name = call["function"]["name"]
     try:
         args = json.loads(call["function"].get("arguments") or "{}")
@@ -91,33 +94,12 @@ async def _tool(call: dict, persona, brief: dict, trace: Trace, root, messages: 
         span.output = json.dumps(result)
         if "error" in result:
             span.error = str(result["error"])
+    content = json.dumps(result, ensure_ascii=False)[:12000]
+    if "error" not in result:
+        if name == "web_search":
+            evidence.extend(Source(**r) for r in result.get("results", []) if json.dumps(r, ensure_ascii=False) in content)
+        else:
+            evidence.append(Source(title=name, url="", quote=content))
     for r in result.get("results", []):
-        seen_urls.add(r["url"])
         await emit("member.source", {"member": persona.member, "title": r["title"], "url": r["url"]})
-    messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)[:12000]})
-
-
-def canned(persona: personas.Persona, brief: dict, question: str, roast: bool) -> Verdict:
-    """Offline answer for when no NICRRON_API_KEY is set."""
-    signal, conf, headline, reason = CANNED.get(persona.member, ("HOLD", 0.5, f"{persona.name} holds steady", "No view without a live model."))
-    if roast:
-        headline = CANNED_ROAST.get(persona.member, headline)
-    return Verdict(
-        signal=signal, confidence=conf, headline=headline, line=headline, tickers=[h["ticker"] for h in brief["holdings"]],
-        reasons=[reason, f"Canned answer to: {question[:80]}", "Set NICRRON_API_KEY for live research."],
-        sources=[Source(title="Placeholder", url="https://example.com/canned", quote="canned")],
-    )
-
-
-CANNED = {
-    "buffett": ("HOLD", 0.7, "Keep owning the index and keep buying", "Hold the index fund; down 30% is a price, not a loss."),
-    "cramer": ("BUY", 0.6, "The trend is your friend, keep buying", "Keep dollar-cost averaging; momentum turns."),
-    "burry": ("SELL", 0.55, "Everything is priced for perfection", "Trim hard; valuations assume nothing goes wrong."),
-    "leopold": ("BUY", 0.65, "The AI build-out is the trendline", "Tilt toward AI infrastructure."),
-}
-CANNED_ROAST = {
-    "buffett": "Down 30% in an index fund? Even my nap schedule is more active.",
-    "cramer": "BOOYAH, you bought the top! Sound effect: sad trombone!",
-    "burry": "I shorted a housing bubble; you built a portfolio-shaped one.",
-    "leopold": "You're down 30% while the compute curve goes vertical. Bold.",
-}
+    messages.append({"role": "tool", "tool_call_id": call["id"], "content": content})

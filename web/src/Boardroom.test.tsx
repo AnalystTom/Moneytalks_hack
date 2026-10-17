@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import Boardroom from "./Boardroom";
-import { members } from "./contract";
 import type { Member, Verdict } from "./contract";
 
 type ElementProps = {
@@ -48,7 +47,7 @@ describe("cartoon boardroom", () => {
     expect(html.match(/class="speech-bubble"/g)).toHaveLength(4);
     expect(html.match(/aria-label="Pending"/g)).toHaveLength(4);
     expect(html.match(/No verdict yet\./g)).toHaveLength(8);
-    for (const member of Object.keys(members)) {
+    for (const member of ["leopold", "buffett", "burry", "cramer"]) {
       expect(html).toContain(`/portraits/${member}.png`);
       const asset = new URL(
         `../public/portraits/${member}.png`,

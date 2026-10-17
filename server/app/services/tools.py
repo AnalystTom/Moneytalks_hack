@@ -1,17 +1,11 @@
 """The tools in agents/skill.md: what each worker may call, and the dispatcher that runs them."""
 import csv
-import json
 import logging
 
 from app.config import DATA_DIR
 from app.services import anchor
 
 log = logging.getLogger(__name__)
-
-POSITION_FIELDS = (
-    "name", "sector", "weight", "pnl_pct", "current_price", "market_value", "beta", "div_yield",
-    "wk52_high", "wk52_low", "pct_off_high", "style", "cap_label", "role", "days_held",
-)
 
 
 def _spec(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
@@ -23,7 +17,7 @@ def _spec(name: str, description: str, properties: dict, required: list[str] | N
 
 SPECS = {
     "portfolio_lookup": _spec(
-        "portfolio_lookup", "The client's holdings with weights, P&L, beta, yield and 52-week range, plus the account summary.",
+        "portfolio_lookup", "The client's submitted holdings, brief summary and available bank data; account details are unavailable.",
         {"ticker": {"type": "string", "description": "One symbol; omit for the whole portfolio."}},
     ),
     "persona_profile": _spec("persona_profile", "The client's own profile: age, goals, horizon, risk tolerance, where the money is held.", {}),
@@ -43,31 +37,15 @@ def specs() -> list[dict]:
     return [s for name, s in SPECS.items() if name != "web_search" or anchor.enabled()]
 
 
-def _snapshot() -> dict:
-    try:
-        return json.loads((DATA_DIR / "portfolio.json").read_text())
-    except (OSError, ValueError):
-        return {}
-
-
 def _portfolio(brief: dict, ticker: str | None = None) -> dict:
-    positions = {p["symbol"]: p for p in _snapshot().get("positions", [])}
-    holdings = []
-    for h in brief["holdings"]:
-        if ticker and h["ticker"] != ticker.upper():
-            continue
-        extra = {k: v for k, v in positions.get(h["ticker"], {}).items() if k in POSITION_FIELDS}
-        holdings.append({"ticker": h["ticker"], "shares": h["shares"], "cost_basis": h["cost_basis"], **extra})
+    holdings = [dict(h) for h in brief["holdings"] if not ticker or h["ticker"] == ticker.upper()]
     if ticker and not holdings:
         return {"error": f"{ticker.upper()} is not in the client's portfolio"}
-    return {"summary": brief["summary"], "account": _snapshot().get("summary", {}), "bank": brief.get("bank"), "holdings": holdings}
+    return {"summary": brief["summary"], "account": None, "bank": brief.get("bank"), "holdings": holdings}
 
 
 def _profile(brief: dict) -> dict:
-    text = brief.get("persona") or ""
-    if not text.strip() and (DATA_DIR / "PERSONA.md").exists():
-        text = (DATA_DIR / "PERSONA.md").read_text()
-    return {"profile": text[:6000]}
+    return {"profile": brief.get("persona") or ""}
 
 
 def _specialist(persona, who: str | None) -> dict:
@@ -75,8 +53,8 @@ def _specialist(persona, who: str | None) -> dict:
         rows = list(csv.DictReader((DATA_DIR / "specialist.csv").open(newline="")))
     except OSError:
         return {"error": "specialist sheet not found"}
-    want = (who or persona.specialist).lower()
-    row = next((r for r in rows if r["Persona"].lower() == want or want in r["Persona"].lower()), None)
+    want = (persona.specialist if who is None else who).lower()
+    row = next((r for r in rows if r["Persona"].lower() == want), None)
     return row or {"error": f"no row for {who!r}", "available": [r["Persona"] for r in rows]}
 
 

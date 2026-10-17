@@ -24,6 +24,18 @@ async def search(query: str) -> list[Source]:
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(URL, headers={"anchor-api-key": env("ANCHOR_API_KEY")}, json={"prompt": prompt})
     r.raise_for_status()
-    match = re.search(r"\[.*\]", r.text.replace('\\"', '"'), re.DOTALL) or re.search(r"\[.*\]", r.text, re.DOTALL)
-    rows = json.loads(match.group(0)) if match else []
-    return [Source(title=str(x["title"]), url=str(x["url"]), quote=str(x.get("quote", ""))) for x in rows if x.get("url")]
+    rows = r.json()["data"]["result"]
+    if isinstance(rows, dict):
+        rows = rows["result"]
+    if isinstance(rows, str):
+        rows = json.loads(rows)
+    if not isinstance(rows, list):
+        raise ValueError("Anchor result must be an array of sources")
+    sources = []
+    for row in rows:
+        if not isinstance(row, dict) or any(not isinstance(row.get(k), str) or not row[k].strip() for k in ("title", "url", "quote")):
+            raise ValueError("Anchor sources require a title, URL and quote")
+        if not row["url"].startswith(("https://", "http://")):
+            raise ValueError("Anchor source URL must use HTTP or HTTPS")
+        sources.append(Source(**{k: row[k] for k in ("title", "url", "quote")}))
+    return sources

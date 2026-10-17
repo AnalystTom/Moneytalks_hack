@@ -1,14 +1,13 @@
+import asyncio
 import json
-import shutil
 
 import httpx
 import pytest
 
-from app.config import AGENTS_DIR
 from app.services import council, elevenlabs, llm, personas, prism, tools
 from tests.conftest import parse_sse
 
-VERDICT = {"signal": "SELL", "confidence": 0.9, "headline": "h", "reasons": ["r"], "tickers": ["VOO"], "sources": [], "line": "say this"}
+VERDICT = {"signal": "SELL", "confidence": 0.9, "headline": "h", "reasons": ["r"], "tickers": ["VOO"], "sources": [{"title": "portfolio_lookup", "url": "", "quote": "VOO"}], "line": "say this"}
 CHAIR = {"overall_signal": "HOLD", "consensus": "c", "dissent": ["burry: SELL"], "summary": "Warren rules."}
 TOOL_CALLS = [
     {"id": f"call-{n}", "type": "function", "function": {"name": n, "arguments": a}}
@@ -35,7 +34,7 @@ class FakeLLM:
         elif not any(m["role"] == "tool" for m in messages):
             return self._result({"role": "assistant", "content": None, "tool_calls": TOOL_CALLS})
         else:
-            reply = self.verdict
+            reply = {**self.verdict, "headline": "roasted"} if "ROAST MODE" in messages[1]["content"] else self.verdict
         return self._result({"role": "assistant", "content": "```json\n" + json.dumps(reply) + "\n```"})
 
     @staticmethod
@@ -59,13 +58,13 @@ def test_fan_out_gives_each_worker_its_own_context(client, brief_id, fake):
     events = run(client, brief_id)
     assert events[-1][0] == "run.done"
     verdicts = [d["member"] for e, d in events if e == "member.verdict"]
-    assert sorted(verdicts) == ["buffett", "burry", "cramer", "leopold"] and verdicts[-1] == "buffett"
+    assert sorted(verdicts) == ["buffett", "burry", "cramer", "dalio", "leopold"] and verdicts[-1] == "buffett"
     workers = [(s, m) for s, m, t in fake.calls if "RULING PHASE" not in m[1]["content"] and "ASSIGNMENT PHASE" not in m[1]["content"]]
-    assert len(workers) == 8  # 4 workers x (tool round + answer)
-    for name in ("Warren Buffett", "Michael Burry", "Jim Cramer", "Leopold Aschenbrenner"):
+    assert len(workers) == 10  # 5 workers x (tool round + answer)
+    for name in ("Warren Buffett", "Michael Burry", "Jim Cramer", "Leopold Aschenbrenner", "Ray Dalio"):
         mine = [s for s, _ in workers if s.startswith(f"# {name}")]
         assert len(mine) == 2
-        others = [n for n in ("Warren Buffett", "Michael Burry", "Jim Cramer", "Leopold Aschenbrenner") if n != name]
+        others = [n for n in ("Warren Buffett", "Michael Burry", "Jim Cramer", "Leopold Aschenbrenner", "Ray Dalio") if n != name]
         assert not any(f"# {o}" in mine[0] for o in others)  # no persona sees another's prompt
     assert any("look at X for burry" in m[1]["content"] for _, m in workers)  # the chair's assignment reached the worker
     assert all("portfolio_lookup" in s for s, _ in workers)  # skill.md is part of every worker's prompt
@@ -111,18 +110,8 @@ def test_worker_failing_twice_fails_the_run(client, brief_id, monkeypatch, fake)
     assert run(client, brief_id)[-1][0] == "run.error"
 
 
-def test_a_fifth_persona_is_just_a_file(client, brief_id, fake, monkeypatch, tmp_path):
-    shutil.copytree(AGENTS_DIR, tmp_path / "agents")
-    (tmp_path / "agents" / "personas" / "dalio.md").write_text(
-        "---\nmember: dalio\nname: Ray Dalio\nrole: Macro\norder: 4\nspecialist: Ray Dalio\n---\n# Ray Dalio\nBalance risk across regimes.\n"
-    )
-    monkeypatch.setattr("app.services.personas.AGENTS_DIR", tmp_path / "agents")
-    personas.load.cache_clear()
-    try:
-        events = run(client, brief_id)
-    finally:
-        monkeypatch.undo()
-        personas.load.cache_clear()
+def test_five_personas_ship(client, brief_id, fake):
+    events = run(client, brief_id)
     assert sorted(d["member"] for e, d in events if e == "member.verdict") == ["buffett", "burry", "cramer", "dalio", "leopold"]
 
 
@@ -140,6 +129,8 @@ def test_sources_not_returned_by_a_tool_are_dropped(client, brief_id, monkeypatc
         {"title": "Real", "url": "https://real.example.org/a", "quote": "q"},
         {"title": "Made up", "url": "https://invented.example.org/z", "quote": "q"},
         {"title": "Portfolio", "url": "", "quote": "VOO 100%"},
+        {"title": "Real", "url": "https://real.example.org/a", "quote": "$100"},
+        {"title": "Invented title", "url": "https://real.example.org/a", "quote": "q"},
     ]}
     f = FakeLLM(verdict=answer)
     real = f.chat
@@ -155,7 +146,7 @@ def test_sources_not_returned_by_a_tool_are_dropped(client, brief_id, monkeypatc
     monkeypatch.setattr(llm, "chat", chat)
     events = run(client, brief_id)
     v = next(d for e, d in events if e == "member.verdict")
-    assert [s["url"] for s in v["sources"]] == ["https://real.example.org/a", ""]
+    assert [s["url"] for s in v["sources"]] == ["https://real.example.org/a"]
     assert any(e == "member.source" and d["url"] == "https://real.example.org/a" for e, d in events)
 
 
@@ -164,12 +155,12 @@ async def test_tool_dispatch(monkeypatch):
     burry = personas.load()["burry"]
     whole = await tools.call("portfolio_lookup", {}, brief, burry)
     pltr = next(h for h in whole["holdings"] if h["ticker"] == "PLTR")
-    assert pltr["sector"] == "Technology" and "portfolio_beta" in whole["account"]
+    assert pltr == brief["holdings"][0] and whole["account"] is None
     assert (await tools.call("portfolio_lookup", {"ticker": "pltr"}, brief, burry))["holdings"][0]["ticker"] == "PLTR"
     assert "error" in await tools.call("portfolio_lookup", {"ticker": "NOPE"}, brief, burry)
     assert (await tools.call("persona_profile", {}, brief, burry)) == {"profile": "# Alex"}
     assert (await tools.call("specialist_row", {}, brief, burry))["Persona"] == "Michael Burry"
-    assert (await tools.call("specialist_row", {"persona": "cramer"}, brief, burry))["Persona"] == "Jim Cramer"
+    assert (await tools.call("specialist_row", {"persona": "jim cramer"}, brief, burry))["Persona"] == "Jim Cramer"
     assert "error" in await tools.call("nope", {}, brief, burry)
     assert "error" in await tools.call("web_search", {"query": "x"}, brief, burry)  # not offered without ANCHOR_API_KEY
 
@@ -197,12 +188,12 @@ def test_prism_gets_a_trace_per_agent_with_run_id_as_session(client, brief_id, f
     events = run(client, brief_id)
     run_id = events[0][1]["run_id"]
     done = events[-1][1]
-    assert sorted(t["agent_id"] for t in traces) == ["buffett", "burry", "cramer", "leopold", "orchestrator"]
+    assert sorted(t["agent_id"] for t in traces) == ["buffett", "burry", "cramer", "dalio", "leopold", "orchestrator"]
     assert {t["session_id"] for t in traces} == {run_id} and {s["session_id"] for s in spans} == {run_id}
-    assert done["trace_id"] in {t["trace_id"] for t in traces} and set(done["traces"]) == {"buffett", "burry", "cramer", "leopold"}
+    assert done["trace_id"] in {t["trace_id"] for t in traces} and set(done["traces"]) == {"buffett", "burry", "cramer", "dalio", "leopold"}
     names = [s["name"] for b in spans for s in b["spans"]]
     assert {"worker.burry", "tool.portfolio_lookup", "tool.persona_profile", "tool.specialist_row", "orchestrator.assign", "orchestrator.rule"} <= set(names)
-    assert names.count("tool.portfolio_lookup") == 4  # one tool span per call, per worker
+    assert names.count("tool.portfolio_lookup") == 5  # one tool span per call, per worker
     assert all(t["model"] == "anthropic/claude-opus-5-5" for t in traces)
 
 
@@ -254,3 +245,132 @@ async def test_audio_cache_is_bounded(monkeypatch):
     for n in range(10):
         await elevenlabs.speak("burry", f"line {n}")
     assert len(elevenlabs._audio) == 3
+
+
+async def test_uploaded_account_and_profile_never_inherit_demo_data():
+    persona = personas.load()["burry"]
+    brief = {"summary": "one share", "holdings": [{"ticker": "PLTR", "shares": 1, "cost_basis": 10}], "persona": ""}
+    for args in ({}, {"ticker": "pltr"}):
+        result = await tools.call("portfolio_lookup", args, brief, persona)
+        assert result == {"summary": "one share", "holdings": brief["holdings"], "account": None, "bank": None}
+    assert await tools.call("persona_profile", {}, brief, persona) == {"profile": ""}
+    brief["persona"] = "constraints\n" * 1000
+    assert await tools.call("persona_profile", {}, brief, persona) == {"profile": brief["persona"]}
+
+
+@pytest.mark.parametrize("who", ["a", "", "cramer", "Burry"])
+async def test_specialist_rejects_partial_or_empty_names(who):
+    assert "error" in await tools.call("specialist_row", {"persona": who}, {}, personas.load()["burry"])
+
+
+@pytest.mark.parametrize("source", [
+    {"title": "portfolio_lookup", "url": "", "quote": "VOO 100%"},
+    {"title": "Invented", "url": "", "quote": "VOO"},
+    {"title": "portfolio_lookup", "url": "", "quote": ""},
+])
+def test_unsupported_local_citations_cannot_produce_verdicts(client, brief_id, monkeypatch, source):
+    monkeypatch.setenv("NICRRON_API_KEY", "test")
+    f = FakeLLM(verdict={**VERDICT, "sources": [source]})
+    monkeypatch.setattr(llm, "chat", f.chat)
+    events = run(client, brief_id)
+    assert events[-1][0] == "run.error"
+    assert not any(e == "member.verdict" for e, _ in events)
+
+
+def test_worker_must_research_before_returning_verdict(client, brief_id, fake, monkeypatch):
+    real = fake.chat
+
+    async def no_research(messages, tools=None, max_tokens=4096):
+        if tools:
+            return fake._result({"role": "assistant", "content": json.dumps(VERDICT)})
+        return await real(messages, tools, max_tokens)
+
+    monkeypatch.setattr(llm, "chat", no_research)
+    events = run(client, brief_id)
+    assert events[-1][0] == "run.error"
+    assert not any(e == "member.verdict" for e, _ in events)
+
+
+def test_both_chair_calls_receive_full_uploaded_profile(client, fake):
+    profile = "# Client\n" + "Long horizon. " * 100 + "\nNeed all this money next month."
+    response = client.post("/api/ingest", files={
+        "portfolio": ("p.csv", b"ticker,shares,cost_basis\nVOO,1,10\n"),
+        "persona": ("p.md", profile.encode()),
+    })
+    assert run(client, response.json()["brief_id"])[-1][0] == "run.done"
+    chair_calls = [messages for _, messages, specs in fake.calls if specs is None]
+    assert len(chair_calls) == 2
+    assert all(profile in messages[1]["content"] for messages in chair_calls)
+
+
+@pytest.mark.parametrize("nested,encoded", [(False, False), (False, True), (True, False), (True, True)])
+async def test_anchor_decodes_result_without_corrupting_escapes(monkeypatch, nested, encoded):
+    from app.services import anchor
+
+    rows = [{"title": "Report", "url": "https://issuer.test/report", "quote": 'The CEO said "growth"\nC:\\reports\\new — [10]'}]
+    result = json.dumps(rows) if encoded else rows
+    envelope = {"data": {"result": {"result": result} if nested else result}}
+    real = httpx.AsyncClient
+    monkeypatch.setattr(anchor.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=envelope)), **kw))
+    assert [s.model_dump() for s in await anchor.search("earnings")] == rows
+
+
+@pytest.mark.parametrize("rows", [None, {}, [{"title": 1, "url": "https://issuer.test", "quote": "q"}], [{"title": "t", "url": "javascript:alert(1)", "quote": "q"}], [{"title": "t", "url": "https://issuer.test", "quote": ""}]])
+async def test_anchor_rejects_malformed_sources(monkeypatch, rows):
+    from app.services import anchor
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(anchor.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={"data": {"result": {"result": rows}}})), **kw))
+    with pytest.raises(ValueError):
+        await anchor.search("earnings")
+
+
+@pytest.mark.parametrize("follow_up", [False, True])
+async def test_cancellation_awaits_owned_speech_before_finishing_trace(fake, monkeypatch, follow_up):
+    brief = {"summary": "s", "holdings": [{"ticker": "VOO", "shares": 1, "cost_basis": 10}], "persona": ""}
+    started = asyncio.Event()
+    stopped = set()
+    active = set()
+    finished = []
+
+    async def speak(member, text):
+        active.add(member)
+        if follow_up:
+            started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.add(member)
+
+    async def rule(*args):
+        while len(active) < 4:
+            await asyncio.sleep(0)
+        started.set()
+        await asyncio.Event().wait()
+
+    async def finish(self, output_text, ok=True):
+        if self.agent_id in ("orchestrator", "ask-burry"):
+            assert stopped == active and active
+            finished.append(ok)
+
+    monkeypatch.setattr(elevenlabs, "enabled", lambda: True)
+    monkeypatch.setattr(elevenlabs, "speak", speak)
+    monkeypatch.setattr(council, "_rule", rule)
+    monkeypatch.setattr(prism.Trace, "finish", finish)
+    if follow_up:
+        stream = council.ask({"brief": brief, "verdicts": {}}, "ask-test", "burry", "q", False)
+    else:
+        _, stream = council.start_run(brief, "q", False)
+
+    async def consume():
+        async for _ in stream:
+            pass
+
+    consumer = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+    finally:
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+    assert stopped == active and finished == [False]
