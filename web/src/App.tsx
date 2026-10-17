@@ -214,29 +214,42 @@ export default function App() {
         player.onended = null;
         player.onerror = null;
         player.onpause = null;
+        player.onplaying = null;
+        player.ontimeupdate = null;
         signal.removeEventListener("abort", finish);
         player.pause();
         resolve();
       };
-      const timeout = setTimeout(finish, 30000);
+      const stalled = () => {
+        setAudioMessage(
+          "Voice playback timed out. All answers remain in the transcript.",
+        );
+        finish();
+      };
+      let position = player.currentTime;
+      let timeout = setTimeout(stalled, 30000);
       signal.addEventListener("abort", finish, { once: true });
       player.onended = finish;
       player.onpause = finish;
+      player.onplaying = () => setAudioMessage("");
+      player.ontimeupdate = () => {
+        if (player.currentTime === position) return;
+        position = player.currentTime;
+        clearTimeout(timeout);
+        timeout = setTimeout(stalled, 30000);
+      };
       player.onerror = () => {
         setAudioMessage(
           "Voice unavailable from the server. All answers remain in the transcript.",
         );
         finish();
       };
-      void player
-        .play()
-        .then(() => setAudioMessage(""))
-        .catch(() => {
-          setAudioMessage(
-            "Voice could not play automatically. Use the audio controls to retry.",
-          );
-          finish();
-        });
+      void player.play().catch(() => {
+        setAudioMessage(
+          "Voice could not play automatically. Use the audio controls to retry.",
+        );
+        finish();
+      });
     });
   }
   async function receive(
@@ -339,10 +352,16 @@ export default function App() {
   async function execute(follow: boolean) {
     const abort = new AbortController();
     controller.current = abort;
-    const timeout = setTimeout(
-      () => abort.abort("The council timed out. Please retry."),
-      180000,
-    );
+    const timedOut = () => abort.abort("The council timed out. Please retry.");
+    let timeout = setTimeout(timedOut, 180000);
+    const receiveEvent = async (event: CouncilEvent) => {
+      clearTimeout(timeout);
+      try {
+        await receive(event, abort.signal, follow);
+      } finally {
+        if (!abort.signal.aborted) timeout = setTimeout(timedOut, 180000);
+      }
+    };
     setBusy(true);
     setError("");
     setAudioMessage("");
@@ -364,7 +383,7 @@ export default function App() {
             roast,
           },
           abort.signal,
-          (event) => receive(event, abort.signal, true),
+          receiveEvent,
         );
         setFollowQuestion("");
       } else {
@@ -403,7 +422,7 @@ export default function App() {
           "/api/council/run",
           { brief_id: brief.brief_id, question, roast },
           abort.signal,
-          (event) => receive(event, abort.signal, false),
+          receiveEvent,
         );
       }
     } catch (cause) {
