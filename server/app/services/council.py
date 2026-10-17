@@ -35,7 +35,7 @@ async def _assign(orch: Trace, brief: dict, question: str, roast: bool) -> dict[
     if not llm.enabled():
         return {}
     ps = personas.load()
-    members = [{"member": p.member, "name": p.name, "role": p.role, "lens": p.body.split("## What he flags")[0][:600]} for p in ps.values()]
+    members = [{"member": p.member, "name": p.name, "role": p.role, "lens": p.body[:700]} for p in ps.values()]
     user = f"ASSIGNMENT PHASE\n{_context(brief, question, roast)}\nHoldings: {json.dumps(brief['holdings'])}\nMembers: {json.dumps(members)}"
     messages = [{"role": "system", "content": personas.prompt("orchestrator")}, {"role": "user", "content": user}]
     with orch.span("orchestrator.assign", "llm", user) as span:
