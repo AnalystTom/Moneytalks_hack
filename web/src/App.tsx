@@ -174,6 +174,9 @@ export default function App() {
   const controller = useRef<AbortController | null>(null);
   const contextController = useRef<AbortController | null>(null);
   const persona = useRef("");
+  const acceptedPortfolio = useRef<{ file: File; label: string } | undefined>(
+    undefined,
+  );
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioMember = useRef<Member | undefined>(undefined);
   const soundEnabled = useRef(sound);
@@ -209,7 +212,7 @@ export default function App() {
     setLoadingContext(true);
     setError("");
     try {
-      let file = replacement;
+      let file = replacement ?? acceptedPortfolio.current?.file;
       if (!file || !persona.current) {
         const [portfolioResponse, profileResponse] = await Promise.all([
           fetch("/demo-portfolio.json", { signal }),
@@ -220,8 +223,9 @@ export default function App() {
         persona.current = await profileResponse.text();
         file ??= portfolioFile(await portfolioResponse.json());
       }
+      file = await ingestPortfolio(file);
       const form = new FormData();
-      form.append("portfolio", await ingestPortfolio(file));
+      form.append("portfolio", file);
       form.append(
         "persona",
         new File([persona.current], "persona.md", { type: "text/markdown" }),
@@ -244,14 +248,12 @@ export default function App() {
         .match(/\|\s*\*\*Name\*\*\s*\|\s*([^|]+)/)?.[1]
         ?.trim()
         .split(/\s+/)[0];
-      setContext({
-        briefId: brief.brief_id,
-        label: replacement
-          ? `${replacement.name} loaded`
-          : name
-            ? `${name}’s portfolio loaded`
-            : "Portfolio loaded",
-      });
+      const label = replacement
+        ? `${replacement.name} loaded`
+        : (acceptedPortfolio.current?.label ??
+          (name ? `${name}’s portfolio loaded` : "Portfolio loaded"));
+      acceptedPortfolio.current = { file, label };
+      setContext({ briefId: brief.brief_id, label });
       setRunId("");
       setRunFinished(false);
       setReplyTo(undefined);

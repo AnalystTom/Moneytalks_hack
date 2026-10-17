@@ -390,6 +390,105 @@ it("clears old answers only after a replacement portfolio is accepted", async ()
   expect(html).not.toContain("chat-avatar");
 });
 
+it.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  "retries the accepted upload after expiry (follow-up: %s, rejected replacement: %s)",
+  async (follow, rejected) => {
+    vi.useFakeTimers();
+    const sentContext = async () => {
+      const body = vi
+        .mocked(fetch)
+        .mock.calls.filter(([path]) => path === "/api/ingest")
+        .at(-1)?.[1]?.body;
+      if (!(body instanceof FormData)) throw new Error("Missing ingest form");
+      return Object.fromEntries(
+        await Promise.all(
+          Array.from(body, async ([key, value]) => [
+            key,
+            typeof value === "string" ? value : await value.text(),
+          ]),
+        ),
+      );
+    };
+    const initial = await sentContext();
+    const csv = "ticker,shares,cost_basis\nMSFT,7,200";
+    const holdings = JSON.stringify({
+      holdings: [{ ticker: "MSFT", shares: 7, cost_basis: 200 }],
+    });
+    const uploaded = follow
+      ? new File(
+          [
+            JSON.stringify({
+              positions: [{ symbol: "MSFT", qty: 7, avg_entry_price: 200 }],
+            }),
+          ],
+          "uploaded.json",
+        )
+      : new File([csv], "uploaded.csv");
+    const replace = (file: File) =>
+      get("aria-label", "Replace portfolio").onChange!({
+        target: { value: "", files: [file] },
+      });
+    replace(uploaded);
+    await vi.advanceTimersByTimeAsync(0);
+    const accepted = await sentContext();
+    expect(accepted).toEqual({
+      portfolio: follow ? holdings : csv,
+      persona: initial.persona,
+      plaid: "false",
+    });
+    expect(get("className", "context-chip").children).toBe(
+      `${uploaded.name} loaded`,
+    );
+    await replySession();
+    if (!follow) get("className", "reply-target").onClick!();
+    if (rejected) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        Response.json({ detail: "Invalid holdings" }, { status: 422 }),
+      );
+      replace(new File(["invalid"], "rejected.csv"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(get("className", "error").children).toBe("Invalid holdings");
+      expect(get("className", "context-chip").children).toBe(
+        `${uploaded.name} loaded`,
+      );
+    }
+    vi.mocked(streamCouncil).mockRejectedValueOnce(
+      new Error(follow ? "unknown run_id" : "unknown brief_id"),
+    );
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get("className", "context-chip").children).toBe(
+      "Portfolio unavailable",
+    );
+    vi.mocked(fetch).mockClear();
+    get("className", "context-retry").onClick!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await sentContext()).toEqual(accepted);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(get("className", "context-chip").children).toBe(
+      `${uploaded.name} loaded`,
+    );
+    expect(get("id", "message").value).toBe("Why hold?");
+    expect(get("aria-label", "Send message").disabled).toBe(false);
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).toContain(verdict.headline);
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streamCouncil).toHaveBeenLastCalledWith(
+      "/api/council/run",
+      { brief_id: "brief", question: "Why hold?", roast: false },
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
 describe("spoken answers", () => {
   beforeEach(() => {
     vi.useFakeTimers();
