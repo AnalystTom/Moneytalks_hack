@@ -503,6 +503,12 @@ async def test_worker_receives_and_can_cite_complete_large_tool_results(monkeypa
     ("Return: - 10.5 %", "10.5", False),
     ("Loss: (10.5%)", "10.5%", False),
     ("Loss: (10.5%)", "(10.5%)", True),
+    ("Loss: -$1.25M", "-$1.25", False),
+    ("Loss: -$1.25M", "-$1.25M", True),
+    ("Revenue was $100MM.", "Revenue was $100M", False),
+    ("Revenue was $100MM.", "Revenue was $100MM", True),
+    ("1e3M", "1e3", False),
+    ("1e3M", "1e3M", True),
     ("$100 then $10.", "$10", True),
     ("11 1 1", "1 1", True),
     ("A liquid portfolio.", "liquid portfolio", True),
@@ -517,14 +523,27 @@ def test_citation_excerpts_preserve_complete_numeric_tokens(url, text, quote, ac
             agents._clean(verdict, evidence)
 
 
+@pytest.mark.parametrize("url", ["", "https://issuer.test/report"])
+@pytest.mark.parametrize("suffix", ["K", "k", "M", "m", "B", "b", "T", "t", "mn", "bn", "million", "billion"])
+def test_citations_cannot_omit_attached_magnitude_suffixes(url, suffix):
+    text = f"Revenue was $100{suffix}."
+    evidence = [Source(title="Report", url=url, quote=text)]
+    altered = Verdict(**{**VERDICT, "sources": [{"title": "Report", "url": url, "quote": "Revenue was $100"}]})
+    with pytest.raises(ValueError, match="must cite evidence"):
+        agents._clean(altered, evidence)
+    complete = Verdict(**{**VERDICT, "sources": [{"title": "Report", "url": url, "quote": f"$100{suffix}"}]})
+    assert [source.quote for source in agents._clean(complete, evidence).sources] == [f"$100{suffix}"]
+
+
 @pytest.mark.parametrize("follow_up", [False, True])
 @pytest.mark.parametrize("web", [False, True])
-def test_numeric_quote_truncation_cannot_publish_a_verdict(client, brief_id, fake, monkeypatch, follow_up, web):
+@pytest.mark.parametrize("text,quote", [("The price is $100.", "The price is $10"), ("Revenue was $100M.", "Revenue was $100")])
+def test_numeric_quote_truncation_cannot_publish_a_verdict(client, brief_id, fake, monkeypatch, follow_up, web, text, quote):
     if follow_up:
         run_id = run(client, brief_id)[0][1]["run_id"]
     name = "web_search" if web else "persona_profile"
-    source = {"title": "Report" if web else name, "url": "https://issuer.test/report" if web else "", "quote": "The price is $100."}
-    fake.verdict = {**VERDICT, "sources": [{**source, "quote": "The price is $10"}]}
+    source = {"title": "Report" if web else name, "url": "https://issuer.test/report" if web else "", "quote": text}
+    fake.verdict = {**VERDICT, "sources": [{**source, "quote": quote}]}
     if web:
         monkeypatch.setenv("ANCHOR_API_KEY", "test")
     real = fake.chat
