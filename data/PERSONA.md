@@ -12,11 +12,13 @@
 
 | Attribute           | Details        |
 | ------------------- | -------------- |
-| **Total Net Worth** | $485,000 USD   |
+| **Total Net Worth** | $787,171 USD   |
 
 ## Where the Money Is Held
 
-The person's funds are distributed across the following financial vehicles and accounts:
+The person's funds are distributed across the following financial vehicles and accounts.
+Only the brokerage account is connected to the council (live positions in `portfolio.json`); the
+other balances are self-reported.
 
 | Account / Vehicle          | Institution / Provider     | Account Type              | Balance    |
 | -------------------------- | -------------------------- | ------------------------- | ---------- |
@@ -26,13 +28,15 @@ The person's funds are distributed across the following financial vehicles and a
 | **Mutual Funds**           | Vanguard                   | Brokerage (Index Funds)   | $120,000   |
 | **Roth IRA**               | Charles Schwab             | Individual Retirement     | $70,000    |
 | **Emergency Fund**         | Ally Bank                  | Money Market              | $30,000    |
+| **Brokerage (connected)**  | Paper brokerage, acct PA3K9QDEMO01 | Individual Taxable, 14 stocks/ETFs | $302,171 |
 
 ## Allocation Breakdown
 
-- **Liquid Cash (Bank Accounts):** $85,000 (~17.5%)
-- **Retirement (401k + Roth IRA):** $250,000 (~51.5%)
-- **Investments (Mutual Funds):** $120,000 (~24.7%)
-- **Emergency Reserve:** $30,000 (~6.2%)
+- **Connected Brokerage (stocks/ETFs):** $302,171 (~38.4%), of which $18,431 is uninvested cash
+- **Retirement (401k + Roth IRA):** $250,000 (~31.8%)
+- **Investments (Mutual Funds):** $120,000 (~15.2%)
+- **Liquid Cash (Bank Accounts):** $85,000 (~10.8%)
+- **Emergency Reserve:** $30,000 (~3.8%)
 
 ## Goal
 
