@@ -67,6 +67,33 @@ function VerdictCard({
   );
 }
 
+function ChairRuling({ chair }: { chair: Chair }) {
+  return (
+    <article className="ruling">
+      <p className="eyebrow">THE CHAIR’S FINAL WORD</p>
+      <div className="card-top">
+        <h2>Warren’s ruling</h2>
+        <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
+          {chair.overall_signal}
+        </span>
+      </div>
+      <p>{chair.summary}</p>
+      <h4>Consensus</h4>
+      <p>{chair.consensus}</p>
+      <h4>Dissent</h4>
+      {chair.dissent.length ? (
+        <ul>
+          {chair.dissent.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>No dissent returned.</p>
+      )}
+    </article>
+  );
+}
+
 function MemberDialog({
   children,
   onClose,
@@ -456,17 +483,22 @@ export default function App() {
     void execute(false);
   }
   const hasResults = !!summary;
-  const selectedVerdict = selected
-    ? presented?.member === selected
-      ? presented
-      : verdicts[selected]
-    : undefined;
+  const boardVerdicts = { ...verdicts };
+  for (const item of conversation) {
+    if (item.verdict) boardVerdicts[item.member] = item.verdict;
+  }
+  if (presented) boardVerdicts[presented.member] = presented;
+  const boardChair = conversation.some(
+    (item) => item.member === "buffett" && item.verdict,
+  )
+    ? undefined
+    : chair;
+  const selectedVerdict = selected ? boardVerdicts[selected] : undefined;
   return (
     <div className="app">
       <header className="topbar">
         <a className="brand" href="/" aria-label="Council home">
-          <span className="brand-icon">♜</span> COUNCIL
-          <span className="brand-dot">.</span>
+          C<span className="brand-dot">O</span>UNCIL
         </a>
         <div className="brand-note">
           DIFFERENT PERSPECTIVES.
@@ -517,12 +549,9 @@ export default function App() {
               <Boardroom
                 active={active}
                 statuses={statuses}
-                verdicts={
-                  active && presented?.member === active
-                    ? { ...verdicts, [active]: presented }
-                    : verdicts
-                }
+                verdicts={boardVerdicts}
                 sources={sources}
+                chair={boardChair}
                 onSelect={setSelected}
               />
             </Suspense>
@@ -547,26 +576,28 @@ export default function App() {
             <span>EST. MMXXVI</span>
           </div>
           <div className="member-strip">
-            {memberIds.map((member) => (
-              <button
-                key={member}
-                onClick={() => setSelected(member)}
-                className={active === member ? "active" : ""}
-              >
-                <span className={`portrait-mini ${member}`} />
-                <span>
-                  <strong>{members[member].name}</strong>
-                  <small>{members[member].role}</small>
-                </span>
-                {verdicts[member] && (
-                  <b
-                    className={`signal ${verdicts[member]!.signal.toLowerCase()}`}
-                  >
-                    {verdicts[member]!.signal}
-                  </b>
-                )}
-              </button>
-            ))}
+            {memberIds.map((member) => {
+              const signal =
+                member === "buffett" && boardChair
+                  ? boardChair.overall_signal
+                  : boardVerdicts[member]?.signal;
+              return (
+                <button
+                  key={member}
+                  onClick={() => setSelected(member)}
+                  className={active === member ? "active" : ""}
+                >
+                  <span className={`portrait-mini ${member}`} />
+                  <span>
+                    <strong>{members[member].name}</strong>
+                    <small>{members[member].role}</small>
+                  </span>
+                  {signal && (
+                    <b className={`signal ${signal.toLowerCase()}`}>{signal}</b>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </section>
         <aside className="panel" aria-label="Council chat and brief">
@@ -575,7 +606,7 @@ export default function App() {
               <p className="eyebrow">
                 {hasResults ? "THE CONVERSATION" : "BEFORE WE BEGIN"}
               </p>
-              <h2>{hasResults ? "Council notes" : "Your brief"}</h2>
+              <h2>{hasResults ? "Ask the council" : "Your brief"}</h2>
               <p className="muted">
                 {hasResults
                   ? "Every perspective, in one place."
@@ -744,32 +775,7 @@ export default function App() {
                 {Object.values(verdicts).map((verdict) => (
                   <VerdictCard key={verdict.member} verdict={verdict} />
                 ))}
-                {chair && (
-                  <article className="ruling">
-                    <p className="eyebrow">THE CHAIR’S FINAL WORD</p>
-                    <div className="card-top">
-                      <h2>Warren’s ruling</h2>
-                      <span
-                        className={`signal ${chair.overall_signal.toLowerCase()}`}
-                      >
-                        {chair.overall_signal}
-                      </span>
-                    </div>
-                    <p>{chair.summary}</p>
-                    <h4>Consensus</h4>
-                    <p>{chair.consensus}</p>
-                    <h4>Dissent</h4>
-                    {chair.dissent.length ? (
-                      <ul>
-                        {chair.dissent.map((item, i) => (
-                          <li key={i}>{item}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>No dissent returned.</p>
-                    )}
-                  </article>
-                )}
+                {chair && <ChairRuling chair={chair} />}
                 {conversation.map((item, i) => (
                   <div key={i} className="follow-entry">
                     <p className="user-question">
@@ -906,7 +912,9 @@ export default function App() {
         <MemberDialog onClose={() => setSelected(undefined)}>
           <p className="eyebrow">{members[selected].role}</p>
           <h2>{members[selected].name}</h2>
-          {selectedVerdict ? (
+          {selected === "buffett" && boardChair ? (
+            <ChairRuling chair={boardChair} />
+          ) : selectedVerdict ? (
             <VerdictCard verdict={selectedVerdict} open />
           ) : (
             <>

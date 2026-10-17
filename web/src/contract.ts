@@ -2,15 +2,13 @@ export const members = {
   buffett: {
     name: "Warren Buffett",
     role: "The chair · fundamentals",
-    tile: [0, 1],
   },
   leopold: {
     name: "Leopold Aschenbrenner",
     role: "The AI optimist",
-    tile: [1, 1],
   },
-  burry: { name: "Michael Burry", role: "The contrarian", tile: [1, 0] },
-  cramer: { name: "Jim Cramer", role: "The momentum man", tile: [0, 0] },
+  burry: { name: "Michael Burry", role: "The contrarian" },
+  cramer: { name: "Jim Cramer", role: "The momentum man" },
 } as const;
 export type Member = keyof typeof members;
 export type Source = { title: string; url: string; quote?: string };
