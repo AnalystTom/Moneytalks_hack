@@ -11,6 +11,7 @@ import {
   streamCouncil,
 } from "./contract";
 import type { Chair, CouncilEvent, Member, Source, Verdict } from "./contract";
+import VoiceInput from "./VoiceInput";
 const Boardroom = lazy(() => import("./Boardroom"));
 const pause = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -183,6 +184,7 @@ export default function App() {
   const voiceEnabled = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -501,7 +503,8 @@ export default function App() {
     }
   }
   async function execute() {
-    if (busy || loadingContext || !context || !question.trim()) return;
+    if (busy || voiceBusy || loadingContext || !context || !question.trim())
+      return;
     const message = question.trim();
     const follow = !!replyTo && !!runId && runFinished;
     const abort = new AbortController();
@@ -705,7 +708,7 @@ export default function App() {
                 type="file"
                 accept=".csv,.json"
                 aria-label="Replace portfolio"
-                disabled={busy || loadingContext}
+                disabled={busy || voiceBusy || loadingContext}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) {
@@ -820,6 +823,18 @@ export default function App() {
                 To {members[replyTo].name} ×
               </button>
             )}
+            <VoiceInput
+              disabled={busy || loadingContext || !context}
+              onBusyChange={(value) => {
+                if (value) audio.current?.pause();
+                setVoiceBusy(value);
+              }}
+              onTranscript={(text) =>
+                setQuestion((previous) =>
+                  [previous.trim(), text].filter(Boolean).join(" "),
+                )
+              }
+            />
             <form className="chat-form" onSubmit={submit}>
               <textarea
                 id="message"
@@ -827,7 +842,7 @@ export default function App() {
                 placeholder="Ask the council…"
                 rows={2}
                 value={question}
-                disabled={busy}
+                disabled={busy || voiceBusy}
                 onChange={(event) => setQuestion(event.target.value)}
                 onKeyDown={(event) => {
                   if (
@@ -858,7 +873,9 @@ export default function App() {
                 <button
                   className="send-message"
                   aria-label="Send message"
-                  disabled={loadingContext || !context || !question.trim()}
+                  disabled={
+                    voiceBusy || loadingContext || !context || !question.trim()
+                  }
                 >
                   ↑
                 </button>

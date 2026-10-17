@@ -37,6 +37,7 @@ async def kb_search(agent_id: str, query: str, limit: int = 3) -> list[dict]:
 async def trace(
     session_id: str, agent_id: str, input_text: str, output_text: str,
     steps: list[tuple[str, str, str, str]], ok: bool = True,
+    *, model: str | None = None, span_type: str = "agent",
 ) -> None:
     """Record one trace with a span per (name, span_type, input, output) step; a no-op without PRISMTRACE_API_KEY, never raises."""
     if not (auth := _auth()):
@@ -47,21 +48,21 @@ async def trace(
     status = "ok" if ok else "error"
     body = {
         "trace_id": trace_id, "project_id": project, "session_id": session_id, "agent_id": agent_id,
-        "agent_name": f"{agent_id.removeprefix('council.').title()} {council_version()} ({'KB off' if council_version() == 'v1' else 'KB + grounding rule'})",
-        "model": env("NICRRON_MODEL", "nicrron/auto"), "input_messages": [{"role": "user", "content": input_text}],
+        "agent_name": f"{agent_id.removeprefix('council.').title()} {council_version()} ({'KB off' if council_version() == 'v1' else 'KB + grounding rule'})" if span_type == "agent" else agent_id,
+        "model": model or env("NICRRON_MODEL", "nicrron/auto"), "input_messages": [{"role": "user", "content": input_text}],
         "output_message": output_text, "latency_ms": 0, "metadata": {"status": status, "council_version": council_version()},
     }
     spans = [
         {"span_id": str(uuid.uuid4()), "name": name, "span_type": kind, "start_time": now, "end_time": now,
          "duration_ms": 0, "status": status, "input_text": i, "output_text": o}
-        for name, kind, i, o in [(agent_id, "agent", input_text, output_text), *steps]  # PRISM files the first span's I/O on the trace
+        for name, kind, i, o in [(agent_id, span_type, input_text, output_text), *steps]  # PRISM files the first span's I/O on the trace
     ]
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             (await client.post(f"{host}/api/traces", json=body, headers=headers)).raise_for_status()
-            await client.post(
+            (await client.post(
                 f"{host}/api/spans/ingest", headers=headers,
                 json={"trace_id": trace_id, "project_id": project, "session_id": session_id, "spans": spans},
-            )
+            )).raise_for_status()
     except httpx.HTTPError as e:
         log.warning("PRISM delivery failed: %s", e)
