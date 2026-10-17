@@ -243,3 +243,14 @@ def test_follow_up_asks_one_worker_with_its_earlier_verdict(client, brief_id, fa
     assert {s.split("\n")[0] for s, _, _ in fake.calls} == {"# Michael Burry"}  # only Burry's context ran
     assert "What you said earlier" in fake.calls[0][1][1]["content"]
     assert client.post("/api/council/ask", json={"run_id": run_id, "member": "nobody", "question": "q"}).status_code == 422
+
+
+async def test_audio_cache_is_bounded(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
+    monkeypatch.setenv("ELEVENLABS_VOICE_BURRY", "v")
+    monkeypatch.setattr(elevenlabs, "CACHE_LINES", 3)
+    real = httpx.AsyncClient
+    monkeypatch.setattr(elevenlabs.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"mp3")), **kw))
+    for n in range(10):
+        await elevenlabs.speak("burry", f"line {n}")
+    assert len(elevenlabs._audio) == 3

@@ -10,7 +10,8 @@ URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 VOICES_URL = "https://api.elevenlabs.io/v1/voices"
 _voices: list[dict] | None = None  # the account's voice list, fetched once
 _voice_ids: dict[str, str] = {}
-_audio: dict[tuple[str, str], bytes] = {}  # shortcut: unbounded in-memory cache of spoken lines; bound it if runs get long-lived
+_audio: dict[tuple[str, str], bytes] = {}  # spoken lines, oldest evicted past CACHE_LINES so arbitrary GET /voice/speak text cannot grow memory
+CACHE_LINES = 64
 
 
 class VoiceError(Exception):
@@ -76,4 +77,6 @@ async def speak(member: str, text: str) -> bytes:
     if r.status_code != 200 or not r.content:
         raise VoiceError(f"ElevenLabs returned HTTP {r.status_code}")
     _audio[(member, text)] = r.content
+    while len(_audio) > CACHE_LINES:
+        del _audio[next(iter(_audio))]
     return r.content
