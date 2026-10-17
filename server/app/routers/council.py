@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.models import AskRequest, RunRequest
+from app.models import AskRequest, ChatRequest, RunRequest
 from app.services import council, ingest
 
 router = APIRouter(prefix="/council")
@@ -10,6 +10,15 @@ HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 def _sse(stream) -> StreamingResponse:
     return StreamingResponse(stream, media_type="text/event-stream", headers=HEADERS)
+
+
+def _run(run_id: str) -> dict:
+    run = council.RUNS.get(run_id)
+    if not run:
+        raise HTTPException(404, "unknown run_id")
+    if not run["verdicts"]:
+        raise HTTPException(409, "the opening run has not finished yet")
+    return run
 
 
 @router.post("/run")
@@ -21,9 +30,11 @@ async def run(req: RunRequest) -> StreamingResponse:
     return _sse(stream)
 
 
-@router.post("/ask")
+@router.post("/chat")
+async def chat(req: ChatRequest) -> StreamingResponse:
+    return _sse(council.chat(_run(req.run_id), req.run_id, req.text, req.to, req.roast))
+
+
+@router.post("/ask")  # older clients: one named member; same stream as chat
 async def ask(req: AskRequest) -> StreamingResponse:
-    prior = council.RUNS.get(req.run_id)
-    if not prior:
-        raise HTTPException(404, "unknown run_id")
-    return _sse(council.ask(prior, req.run_id, req.member, req.question, req.roast))
+    return _sse(council.chat(_run(req.run_id), req.run_id, req.question, [req.member], req.roast))
