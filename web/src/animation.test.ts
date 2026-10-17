@@ -67,18 +67,16 @@ describe("stream-driven persona motion", () => {
   });
 });
 describe("returned bubble previews", () => {
-  it("uses one sentence with at most fifteen words without inventing copy", () => {
+  it("keeps up to forty words or 240 characters without inventing copy", () => {
     expect(
       bubbleLine("Keep the allocation steady. More context stays in details."),
-    ).toBe("Keep the allocation steady.");
-    expect(
-      bubbleLine(
-        "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen.",
-      ),
-    ).toBe(
-      "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen…",
+    ).toBe("Keep the allocation steady. More context stays in details.");
+    const words = Array.from({ length: 45 }, (_, i) => `w${i}`);
+    expect(bubbleLine(words.join(" "))).toBe(
+      `${words.slice(0, 40).join(" ")}…`,
     );
-    expect(bubbleLine("x".repeat(200))).toBe("x".repeat(100) + "…");
+    expect(bubbleLine("x ".repeat(150))).toMatch(/^(x ){1,}x?…$/);
+    expect(bubbleLine("x".repeat(300))).toBe("x".repeat(240) + "…");
     expect(bubbleLine(" ")).toBe("");
   });
 });

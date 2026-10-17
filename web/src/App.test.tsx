@@ -149,6 +149,11 @@ it("auto-ingests the checked-in context and renders only chat with one composer"
   hooks.next = 0;
   const html = renderToStaticMarkup(App());
   expect(html).toContain("Jordan’s portfolio loaded");
+  expect(html).toContain("Jordan, 38 — context loaded");
+  expect(html).toContain("$302,171 across 14 holdings");
+  expect(html).toContain("Top positions: PLTR 18%, SPY 16%, NVDA 8%");
+  expect(html).toContain("Cash: $18,431");
+  expect(html).toContain("Goal: Multiply the money and invest it wisely.");
   expect(html).not.toContain("brief-form");
   expect(html).not.toContain("Upload portfolio");
   expect(html).not.toContain("Preview backend");
