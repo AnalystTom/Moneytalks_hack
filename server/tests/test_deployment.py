@@ -65,7 +65,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
 
     def speak(request):
         calls.append(request)
-        return httpx.Response(200, content=b"ID3audio")
+        return httpx.Response(200, content=b"ID3audio", headers={"content-type": "audio/mpeg"})
 
     real_client = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(

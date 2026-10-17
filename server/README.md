@@ -88,6 +88,10 @@ curl -N -X POST localhost:8000/api/council/chat -H 'content-type: application/js
 # speech
 curl -X POST localhost:8000/api/voice/speak -H 'content-type: application/json' \
   -d '{"member":"buffett","text":"Be fearful when others are greedy."}' -o buffett.mp3
+
+# transcribe a microphone recording
+curl -F file=@question.webm localhost:8000/api/voice/transcribe
+# -> {"text":"<actual ElevenLabs transcript>"}
 ```
 
 Run events, in order: `run.started`; `orchestrator.plan` per member (`member`, `focus_tickers`, `shared_tickers`,

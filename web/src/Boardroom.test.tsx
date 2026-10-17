@@ -89,7 +89,7 @@ describe("cartoon boardroom", () => {
     expect(html).not.toContain(longLine);
     expect(
       html.match(/A long returned line with risk and allocation context\./g),
-    ).toHaveLength(8);
+    ).toHaveLength(32);
     for (const signal of ["BUY", "HOLD", "SELL"])
       expect(html).toContain(`aria-label="${signal}"`);
     const bubbles = buttons(tree).filter(

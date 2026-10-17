@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   apiError,
+  contextCard,
   ingestPortfolio,
   members,
   portfolioFile,
@@ -12,12 +13,14 @@ import {
 } from "./contract";
 import type {
   Chair,
+  ContextCard,
   CouncilEvent,
   Member,
   Source,
   Speaker,
   Verdict,
 } from "./contract";
+import VoiceInput from "./VoiceInput";
 const Boardroom = lazy(() => import("./Boardroom"));
 const pause = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -187,6 +190,7 @@ function MemberDialog({
 
 export default function App() {
   const [context, setContext] = useState<{ briefId: string; label: string }>();
+  const [contextSummary, setContextSummary] = useState<ContextCard>();
   const [loadingContext, setLoadingContext] = useState(true);
   const [question, setQuestion] = useState("");
   const [roast, setRoast] = useState(false);
@@ -223,15 +227,16 @@ export default function App() {
   const controller = useRef<AbortController | null>(null);
   const contextController = useRef<AbortController | null>(null);
   const persona = useRef("");
-  const acceptedPortfolio = useRef<{ file: File; label: string } | undefined>(
-    undefined,
-  );
+  const acceptedPortfolio = useRef<
+    { file: File; label: string; snapshot?: unknown } | undefined
+  >(undefined);
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioMember = useRef<Member | undefined>(undefined);
   const soundEnabled = useRef(sound);
   const voiceEnabled = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -262,6 +267,10 @@ export default function App() {
     setError("");
     try {
       let file = replacement ?? acceptedPortfolio.current?.file;
+      let snapshot = acceptedPortfolio.current?.snapshot;
+      if (replacement?.name.toLowerCase().endsWith(".json"))
+        snapshot = JSON.parse(await replacement.text());
+      else if (replacement) snapshot = undefined;
       if (!file || !persona.current) {
         const [portfolioResponse, profileResponse] = await Promise.all([
           fetch("/demo-portfolio.json", { signal }),
@@ -270,7 +279,8 @@ export default function App() {
         if (!portfolioResponse.ok || !profileResponse.ok)
           throw new Error("Portfolio context is unavailable. Please retry.");
         persona.current = await profileResponse.text();
-        file ??= portfolioFile(await portfolioResponse.json());
+        snapshot = await portfolioResponse.json();
+        file ??= portfolioFile(snapshot);
       }
       file = await ingestPortfolio(file);
       const form = new FormData();
@@ -301,7 +311,8 @@ export default function App() {
         ? `${replacement.name} loaded`
         : (acceptedPortfolio.current?.label ??
           (name ? `${name}’s portfolio loaded` : "Portfolio loaded"));
-      acceptedPortfolio.current = { file, label };
+      acceptedPortfolio.current = { file, label, snapshot };
+      setContextSummary(contextCard(snapshot, persona.current));
       setContext({ briefId: brief.brief_id, label });
       setRunId("");
       setRunFinished(false);
@@ -573,7 +584,7 @@ export default function App() {
     }
   }
   async function execute(text = question) {
-    if (busy || loadingContext || !context || !text.trim()) return;
+    if (busy || voiceBusy || loadingContext || !context || !text.trim()) return;
     const message = text.trim();
     const follow = !!runId && runFinished;
     const abort = new AbortController();
@@ -778,7 +789,7 @@ export default function App() {
                 type="file"
                 accept=".csv,.json"
                 aria-label="Replace portfolio"
-                disabled={busy || loadingContext}
+                disabled={busy || voiceBusy || loadingContext}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) {
@@ -798,6 +809,16 @@ export default function App() {
             aria-label="Council messages"
             aria-live="polite"
           >
+            {contextSummary && (
+              <article className="chat-message context-card">
+                <small>{contextSummary.title}</small>
+                <ul>
+                  {contextSummary.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </article>
+            )}
             {!messages.length && (
               <p className="chat-empty">
                 What would you like the council to consider?
@@ -934,6 +955,18 @@ export default function App() {
                 To {members[replyTo].name} ×
               </button>
             )}
+            <VoiceInput
+              disabled={busy || loadingContext || !context}
+              onBusyChange={(value) => {
+                if (value) audio.current?.pause();
+                setVoiceBusy(value);
+              }}
+              onTranscript={(text) =>
+                setQuestion((previous) =>
+                  [previous.trim(), text].filter(Boolean).join(" "),
+                )
+              }
+            />
             <form className="chat-form" onSubmit={submit}>
               <textarea
                 id="message"
@@ -941,7 +974,7 @@ export default function App() {
                 placeholder="Ask the council…"
                 rows={2}
                 value={question}
-                disabled={busy}
+                disabled={busy || voiceBusy}
                 onChange={(event) => setQuestion(event.target.value)}
                 onKeyDown={(event) => {
                   if (
@@ -972,7 +1005,9 @@ export default function App() {
                 <button
                   className="send-message"
                   aria-label="Send message"
-                  disabled={loadingContext || !context || !question.trim()}
+                  disabled={
+                    voiceBusy || loadingContext || !context || !question.trim()
+                  }
                 >
                   ↑
                 </button>

@@ -240,3 +240,45 @@ export async function streamCouncil(
     reader.releaseLock();
   }
 }
+
+export type ContextCard = { title: string; lines: string[] };
+
+const usd = (value: number) => `$${Math.round(value).toLocaleString("en-US")}`;
+
+// Describes what the ingest call was given: broker snapshot plus persona text.
+export function contextCard(
+  snapshot: unknown,
+  persona: string,
+): ContextCard | undefined {
+  const { account, positions } = (snapshot ?? {}) as {
+    account?: { equity?: unknown; cash?: unknown };
+    positions?: { symbol?: unknown; market_value?: unknown }[];
+  };
+  if (!Array.isArray(positions) || typeof account?.equity !== "number")
+    return undefined;
+  const name = persona.match(/\|\s*\*\*Name\*\*\s*\|\s*([^|]+)/)?.[1]?.trim();
+  const age = persona.match(/\|\s*\*\*Age\*\*\s*\|\s*(\d+)/)?.[1];
+  const goal = persona.match(/\*\*Primary Objective:\*\*\s*(.+)/)?.[1]?.trim();
+  const top = positions
+    .filter(
+      (p) => typeof p.symbol === "string" && typeof p.market_value === "number",
+    )
+    .sort((a, b) => Number(b.market_value) - Number(a.market_value))
+    .slice(0, 3)
+    .map(
+      (p) =>
+        `${p.symbol} ${Math.round((Number(p.market_value) / Number(account.equity)) * 100)}%`,
+    );
+  const lines = [
+    `${usd(account.equity)} across ${positions.length} holdings`,
+    top.length ? `Top positions: ${top.join(", ")}` : "",
+    typeof account.cash === "number" ? `Cash: ${usd(account.cash)}` : "",
+    goal ? `Goal: ${goal}` : "",
+  ].filter(Boolean);
+  return {
+    title: name
+      ? `${name.split(/\s+/)[0]}${age ? `, ${age}` : ""} — context loaded`
+      : "Context loaded",
+    lines,
+  };
+}

@@ -29,7 +29,7 @@ def env(name: str, default: str = "") -> str:
 
 
 def voice_id(member: str) -> str:
-    return env(f"ELEVENLABS_VOICE_{member.upper()}")
+    return env(f"ELEVENLABS_VOICE_{member.upper()}") or env("ELEVENLABS_VOICE_ID")
 
 
 def council_version() -> str:

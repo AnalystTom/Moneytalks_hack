@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import VoiceInput from "./VoiceInput";
 import { streamCouncil } from "./contract";
 import type { Verdict } from "./contract";
 
@@ -47,16 +48,19 @@ type Props = {
   onClick?: () => void;
   onSubmit?: (event: { preventDefault: () => void }) => void;
   onChange?: (event: { target: { value: string; files?: File[] } }) => void;
+  onTranscript?: (text: string) => void;
+  onBusyChange?: (busy: boolean) => void;
 };
-function find(node: ReactNode, key: string, value: string): Props | undefined {
+function find(node: ReactNode, key: string, value: unknown): Props | undefined {
   for (const child of Children.toArray(node)) {
     if (!isValidElement<Props>(child)) continue;
-    if (child.props[key] === value) return child.props;
+    if ((key === "type" ? child.type : child.props[key]) === value)
+      return child.props;
     const nested = find(child.props.children, key, value);
     if (nested) return nested;
   }
 }
-function get(key: string, value: string): Props {
+function get(key: string, value: unknown): Props {
   hooks.next = 0;
   const props = find(App(), key, value);
   if (!props) throw new Error(`Missing ${key}=${value}`);
@@ -147,6 +151,11 @@ it("auto-ingests the checked-in context and renders only chat with one composer"
   hooks.next = 0;
   const html = renderToStaticMarkup(App());
   expect(html).toContain("Jordan’s portfolio loaded");
+  expect(html).toContain("Jordan, 38 — context loaded");
+  expect(html).toContain("$302,171 across 14 holdings");
+  expect(html).toContain("Top positions: PLTR 18%, SPY 16%, NVDA 8%");
+  expect(html).toContain("Cash: $18,431");
+  expect(html).toContain("Goal: Multiply the money and invest it wisely.");
   expect(html).not.toContain("brief-form");
   expect(html).not.toContain("Upload portfolio");
   expect(html).not.toContain("Preview backend");
@@ -156,6 +165,24 @@ it("auto-ingests the checked-in context and renders only chat with one composer"
   expect(streamCouncil).toHaveBeenCalledWith(
     "/api/council/run",
     expect.objectContaining({ brief_id: "brief", question: "Should I hold?" }),
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+});
+
+it("preserves typed text and blocks sending while a voice question is pending", async () => {
+  get("type", VoiceInput).onBusyChange!(true);
+  expect(get("aria-label", "Send message").disabled).toBe(true);
+  submit("chat-form");
+  expect(streamCouncil).not.toHaveBeenCalled();
+  get("type", VoiceInput).onTranscript!("What changed?");
+  get("type", VoiceInput).onBusyChange!(false);
+  expect(get("id", "message").value).toBe("Should I hold? What changed?");
+  submit("chat-form");
+  await idle();
+  expect(streamCouncil).toHaveBeenCalledWith(
+    "/api/council/run",
+    expect.objectContaining({ question: "Should I hold? What changed?" }),
     expect.any(AbortSignal),
     expect.any(Function),
   );

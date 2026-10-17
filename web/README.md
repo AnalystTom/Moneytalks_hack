@@ -34,6 +34,8 @@ Bubbles preview the server's `speech_bubble` field when returned, otherwise the 
 
 Voice is loaded only when `/api/health` explicitly reports `voice: true` and sound is enabled. Actual playback starts and stops the speaking pose; text-only runs use a short speaking beat. Playback failures disable further audio loads for that run. A clip with no playback progress for 30 seconds releases the stream. Pausing or cancelling releases playback.
 
+Use **Speak your question** above the composer to record a question, then **Stop recording** to transcribe it with ElevenLabs Scribe v2. Review the text and send; existing composer text is preserved. Reply to a member message for a spoken follow-up. Capture pauses previous audio to avoid recording it, stops at sixty seconds, and releases the microphone on errors or unmount. Microphone access needs HTTPS or localhost; provider errors leave typed input intact. See [server voice setup](../server/README.md#voice-conversations) for credentials and privacy.
+
 The checked-in context is demo data, not a connected bank account. The frontend never supplies financial verdicts, confidence, citations or balances itself and cannot certify the backend's research. Example-domain source URLs are excluded. See [deployment](../server/README.md#deploy-cloudflare) for backend storage limits. If context expires, Retry re-ingests the last accepted holdings and profile kept in this tab's memory; rejected replacements do not overwrite the accepted holdings. Refreshing clears the conversation and reloads the checked-in demo context.
 
 ## Checks
