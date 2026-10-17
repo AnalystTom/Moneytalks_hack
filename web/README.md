@@ -32,7 +32,7 @@ Voice plays sequentially when `/api/voice/speak` is configured. Each clip can fi
 
 **Load demo** reads `data/portfolio.json` through a Vite development endpoint or emitted build asset. As with uploaded broker JSON, position `symbol`, `qty` and `avg_entry_price` become `ticker`, `shares` and `cost_basis`; snapshot market prices and account balances are not submitted. The profile is loaded verbatim from `data/PERSONA.md`; the question follows the journey in `data/spec.md`. This is explicitly labelled synthetic demo data. Sandbox is a request to the server, never a claim that a real bank is connected.
 
-The existing server returns canned verdicts without a model key, stub market/bank data and placeholder research links. The preview notice stays visible and example-domain source URLs are shown as unavailable. The frontend never supplies financial verdicts, confidence, citations or balances itself. It cannot certify the backend's research as live. There is no client-side answer cache; retrying after a backend restart requires a new brief.
+See the [backend guide](../server/README.md) for provider requirements and data limitations. The preview notice stays visible and example-domain source URLs are shown as unavailable. The frontend never supplies financial verdicts, confidence, citations or balances itself. It cannot certify the backend's research as live. There is no client-side answer cache; retrying after a backend restart requires a new brief.
 
 ## Checks
 

@@ -4,7 +4,7 @@ MONEY TALKS 2 hackathon, Money Intelligence track. Submission: Saturday 2026-10-
 
 ## Pitch
 
-You sit at the head of a boardroom table. A council of legendary investors - Warren Buffett, Jim Cramer, Michael Burry, Leopold Aschenbrenner - reads your portfolio, bank account and profile, researches live, and each gives you a cited Buy / Hold / Sell verdict.
+You sit at the head of a boardroom table. A council of legendary investors - Warren Buffett, Jim Cramer, Michael Burry, Leopold Aschenbrenner, Ray Dalio - reads your portfolio, bank account and profile, researches live, and each gives you a cited Buy / Hold / Sell verdict.
 
 ICP: retail investors managing their own money.
 Not financial advice: the UI shows a persistent "parody personas, not financial advice" notice.
@@ -18,19 +18,20 @@ Not financial advice: the UI shows a persistent "parody personas, not financial 
    - Demo shortcut: "Load Alex" prefills all three (portfolio $10,000 in an S&P 500 ETF, down 30%; Plaid sandbox account; Alex's `persona.md`).
    - Alex asks: "I'm down 30%. Keep dollar-cost averaging, sell, or move somewhere else?"
 2. **Ingest.** The server merges the three sources into one client brief and shows a one-line summary in chat ("$10k in VOO, -30%; $4.2k cash; 10-year horizon, moderate risk").
-3. **Council researches.** All four members research in parallel; each speech bubble shows the member's current status, or a count of available sources when no status has arrived. Select a member to view source links in expanded details.
+3. **Council researches.** All five members research in parallel with separate contexts; linked web sources are available when Anchor is configured. The current scene has four portrait seats; Dalio appears in the member strip and transcript. Each speech bubble shows the member's current status, or a count of available sources when no status has arrived. Select a member to view source links in expanded details.
 4. **Verdicts.** Members reveal one by one: signal, confidence, headline, 2-3 reasons, cited sources.
    - Buffett - fundamentals
    - Cramer - trend following
    - Burry - contrarian / bear case
    - Leopold - AI thesis
+   - Dalio - global macro
 5. **Drum roll.** Before the final call, a drum-roll beat builds tension.
 6. **Warren's ruling.** Warren is the orchestrator at the head of the table: he hands out the research, then gives the final summary - consensus, dissent, overall call.
 7. **Follow-up.** The user asks one named member a question in chat; only that member answers.
 
 **Roast mode** (toggle): the council roasts the user's portfolio instead of advising politely - same flow, comedic voice.
 
-Answers are cached per input + question so the stage demo survives a bad network; the cached replay emits the same events as a live run.
+Planned: cache answers per input + question so the stage demo survives a bad network, replaying the same events as a live run. Current persistence limits are in the [backend guide](../server/README.md#known-limits).
 
 ## Screen
 
@@ -46,26 +47,35 @@ The scene and chat only render events; they never call models.
 - `POST /api/ingest` - multipart: portfolio file, Plaid sandbox flag, `persona.md` -> `{brief_id, summary}`.
 - `POST /api/council/run` - `{brief_id, question}` -> Server-Sent Events stream.
 - `POST /api/council/ask` - `{run_id, member, question}` -> same stream shape, one member only.
-- `POST /api/voice/speak` - `{member, text}` -> `audio/mpeg`, spoken in that member's ElevenLabs voice (voice ids per member from env).
+- `POST /api/voice/speak` - `{member, text}` -> `audio/mpeg`; voice resolution and requirements are in the [backend guide](../server/README.md#agents).
+- `GET /api/voice/speak?member=&text=` - playable audio URL used by `member.audio`.
 - `run` and `ask` accept `roast: bool`.
 
 Events (`event:` name, JSON `data:`):
 
-| event                    | data                                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run.started`            | `run_id`                                                                                                                                   |
-| `member.status`          | `member`, `status`: `researching` / `thinking` / `speaking` / `done`                                                                       |
-| `member.source`          | `member`, `title`, `url`                                                                                                                   |
-| `member.verdict`         | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]` |
-| `chair.summary`          | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren)                                                                   |
-| `member.audio`           | `member`, `audio_url` (ElevenLabs speech for that member's line)                                                                           |
-| `run.done` / `run.error` | `run_id` / `message`                                                                                                                       |
+| event | data |
+|---|---|
+| `run.started` | `run_id` |
+| `member.status` | `member`, `status`: `researching` / `thinking` / `speaking` / `done` |
+| `member.source` | `member`, `title`, `url` |
+| `member.verdict` | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]`, `line` (spoken text) |
+| `chair.summary` | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren) |
+| `member.audio` | `member`, `audio_url` (ElevenLabs speech for that member's line) |
+| `run.done` | `run_id`, `trace_id` (nullable); council runs also include `traces` (member id -> submitted trace id). Follow-ups return the worker trace id only. |
+| `run.error` | `message` |
 
-`member` is one of `buffett`, `cramer`, `burry`, `leopold`.
+Backend member ids come from the `member` front matter in `server/agents/personas/`; the frontend accepts the ids in `web/src/contract.ts`.
+
+Order: `run.started`; workers emit `member.status` researching, optional `member.source` and thinking events
+as tools run, then `member.verdict`. Warren researches concurrently but his verdict is held until the others
+have reported. Next comes `chair.summary`, then speaking -> `member.audio` -> done for each non-chair
+member in persona order, followed by Warren speaking the ruling, then `run.done`. A follow-up emits only
+the named member's events and no chair summary. Failures emit `run.error`; missing model configuration
+produces no verdicts. Audio URLs may fail independently when speech is unavailable.
 
 ## Council members
 
-One file per member in `server/agents/personas/<name>.md` (with `server/agents/orchestrator.md` and the tools in `server/agents/skill.md`): philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, _Situational Awareness_ for Leopold).
+Persona files and orchestration are described in the [backend guide](../server/README.md#agents).
 
 ## Stack
 
@@ -73,14 +83,14 @@ One file per member in `server/agents/personas/<name>.md` (with `server/agents/o
 - Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Web search: Anchor.
-- Voice: ElevenLabs text-to-speech, one cloned voice per member (`ELEVENLABS_VOICE_<MEMBER>`).
+- Voice: ElevenLabs text-to-speech; see the [backend voice configuration](../server/README.md#agents).
 - Bank data: Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0).
 - Market data: TBD (current prices for holdings).
 - Financial-analysis skills: built by KJ; members call them through one shared tool interface (stubbed until KJ's piece lands).
 - PRISM (plain HTTP; the `prismtrace-sdk` Python package does not run inside Workers):
-  - Traces: `POST https://prism.blockconvey.com/api/traces`, header `X-PRISMtrace-Key`, session id = council `run_id`, one span per member and per tool call.
-  - Knowledge Base: each member is a PRISM agent with its own documents; retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
-  - `server/scripts/seed_runs.py` runs 50+ council runs over varied inputs so PRISM has data before any fixing.
+  - Current trace delivery and read-back: see the [backend guide](../server/README.md#agents).
+  - Planned Knowledge Base: each member has its own uploaded documents; retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
+  - Planned `server/scripts/seed_runs.py`: 50+ council runs over varied inputs so PRISM has data before any fixing; this script is not implemented.
 
 For supported settings, see [Env names](../server/README.md#env-names); for Worker secret uploads, see [Deploy (Cloudflare)](../server/README.md#deploy-cloudflare).
 

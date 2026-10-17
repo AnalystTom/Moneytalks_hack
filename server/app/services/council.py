@@ -93,7 +93,7 @@ async def _member(persona, run_id: str, brief: dict, question: str, roast: bool,
 
 
 async def _tts(member: str, text: str, orch: Trace) -> None:
-    """Synthesise ahead of the `speaking` beat so the browser's audio fetch is a cache hit; a failure leaves the URL to 503 on its own."""
+    """Warm the audio cache before playback; failures are logged and the audio endpoint retries synthesis."""
     if not elevenlabs.enabled():
         return
     with orch.span(f"tool.elevenlabs.speak.{member}", "tool", text) as span:

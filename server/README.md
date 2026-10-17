@@ -1,31 +1,36 @@
 # server - FastAPI backend (see [spec](../data/spec.md))
 
 Implements the spec's server-to-scene contract. Without `NICRRON_API_KEY`, runs and follow-ups emit an explicit `run.error`. Plaid and market data are stubs behind
-`app/services/`; PRISM tracing no-ops without `PRISMTRACE_API_KEY`.
+`app/services/`; PRISM tracing requires both `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
 
 ## Agents
 
-Everything the agents know lives in `agents/` as plain markdown:
+Persona, orchestration and tool guidance lives in `agents/` as plain markdown:
 
 | file | what |
 |---|---|
 | `agents/orchestrator.md` | system prompt of the chair/orchestrator: hands out research, then rules |
-| `agents/skill.md` | the tools every worker can call (`portfolio_lookup`, `persona_profile`, `specialist_row`, `web_search` only when `ANCHOR_API_KEY` is set) |
+| `agents/skill.md` | worker tool guidance; callable schemas and dispatch live in `app/services/tools.py` |
 | `agents/personas/<name>.md` | one worker per file: front matter (`member` id, name, `order`, `chair`, voice hints) + who they are, voice, what they research and flag |
 
-A run: the orchestrator (Claude Opus 5.5 via Nicrron) writes a research assignment per persona; one worker per
+A run: the orchestrator uses the [configured Nicrron model](#env-names) to write a research assignment per persona; one worker per
 persona file then runs in parallel, each with its own message context and its own tool-calling loop, and
-returns a verdict (`signal`, `confidence`, `headline`, `reasons`, `sources`, `tickers`, plus a short speech-bubble
-`line`); the chair rules (`chair.summary`); each line is spoken in ElevenLabs. **Adding a council member is
-adding a file in `agents/personas/` and accepting its id in the frontend contract.** Roast mode only changes tone. Client holdings and profile come only from their uploaded brief. The specialist sheet comes from
+returns a cited verdict. The chair receives the full uploaded profile and holdings in both assignment and ruling phases.
+An unusable assignment leaves workers to research without a personalised assignment; an unusable ruling
+emits `run.error` instead of a computed replacement. Speech is requested through ElevenLabs when configured.
+Follow-ups give the named worker its earlier headline and reasons, plus access to the same brief through tools.
+**Adding a council member requires a file in `agents/personas/` and frontend support for its id and presentation.** Roast mode only changes tone. Client holdings and profile come only from their uploaded brief. The specialist sheet comes from
 `../data/specialist.csv` (override the folder with `DATA_DIR`).
 
 PRISM: one trace per agent (the orchestrator and each worker), all with `session_id` = the run id; spans are
 the workers, every LLM call and every tool call (including ElevenLabs). The ids are in `run.done`
-(`trace_id`, `traces`); read one back with `GET <PRISMTRACE_HOST>/api/traces/<id>` and `/api/spans/<id>`.
+(see the [stream contract](../data/spec.md#server-to-scene-contract)); read one back with `GET <PRISMTRACE_HOST>/api/traces/<id>` and `/api/spans/<id>`.
+Trace ids report successful submission, not independent read-back verification. Persona reference-document lists
+do not load documents into PRISM or perform Knowledge Base retrieval.
 
 Voices: `ELEVENLABS_VOICE_<MEMBER>` wins; otherwise the account voice whose name matches the persona's
-`voice_names`; otherwise the persona's `voice_fallback` voice (logged). Voices are never created or cloned.
+`voice_names`; otherwise the persona's `voice_fallback` voice (logged). If neither configured name resolves,
+speech returns a voice-unavailable error (503), without selecting an arbitrary account voice. Voices are never created or cloned.
 
 ## Run
 
@@ -72,9 +77,9 @@ Copy `../.env.example` to `../.env`. `NICRRON_API_KEY` is required for council a
 | name | effect |
 |---|---|
 | `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); unset = explicit unavailable error. The model is `anthropic/claude-opus-5-5` unless `NICRRON_MODEL` names another (`nicrron/auto` counts as unset) |
-| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_CRAMER` / `_BURRY` / `_LEOPOLD` / `_DALIO` | speech; the key alone is enough (voices are matched by name), the voice ids override |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_<MEMBER>` | speech requires the key and a resolvable persona/fallback voice or explicit voice id; `<MEMBER>` is the uppercase persona id |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
-| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM trace + span per member |
+| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | key and project id enable tracing; host defaults to `https://prism.blockconvey.com` |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY` | turns on the workers' `web_search` tool (Anchor) |
 | `DATA_DIR` | folder with `specialist.csv`; default `../data` |
@@ -104,16 +109,14 @@ curl -X POST localhost:8000/api/voice/speak -H 'content-type: application/json' 
   -d '{"member":"buffett","text":"Be fearful when others are greedy."}' -o buffett.mp3
 ```
 
-Events and payloads are the spec's table. Order: `run.started`; the four other members in parallel
-(`member.status` researching -> `member.source` -> thinking -> `member.verdict`); then Warren's own
-verdict; `chair.summary`; a `member.status` speaking -> `member.audio` -> done triple per member
-(`member.audio.audio_url` is `GET /api/voice/speak?member=&text=`, playable in an `<audio>` tag);
-`run.done` (or `run.error`). `member.verdict` also carries `line` (the speech-bubble text) and `run.done` carries the
-PRISM `trace_id` and per-member `traces`.
+Event payloads and ordering are defined in the [stream contract](../data/spec.md#server-to-scene-contract).
 
 ## Known limits
 
 For storage limits, see [Deploy (Cloudflare)](#deploy-cloudflare). No answer caching or replay yet;
 `member.audio` URLs 503 without an ElevenLabs key. Without `ANCHOR_API_KEY` there is no web search, so
-verdict sources are data citations with no URL (the UI shows only linked sources). The Anchor call is untested
+verdict sources are data citations with no URL (the UI shows only linked sources). Source validation requires
+a matching tool title/URL and an excerpt of returned evidence; it does not verify every claim or number in the verdict.
+Worker tool results are passed in full; PRISM trace input/output text is separately capped at 8,000 characters
+(worker LLM-span input records only the first 4,000 characters of the last message). The Anchor call is untested
 against the live service. A `--env-file` run needs `python-dotenv` (a dependency now).

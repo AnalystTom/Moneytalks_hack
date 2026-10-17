@@ -10,7 +10,7 @@ from app.services import llm, personas, tools
 from app.services.prism import Trace
 
 log = logging.getLogger(__name__)
-MAX_STEPS = 6  # model turns before the worker is forced to answer without tools
+MAX_STEPS = 6  # model turns before further tool calls fail, though schemas remain in the request
 OUTPUT_CONTRACT = (
     "Reply, when your research is done, with only a JSON object: "
     '{"signal":"BUY|HOLD|SELL","confidence":0-1,"headline":"one line","reasons":["2-3 short reasons"],'
