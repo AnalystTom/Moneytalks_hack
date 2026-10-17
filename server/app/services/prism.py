@@ -66,3 +66,8 @@ async def trace(
             )).raise_for_status()
     except httpx.HTTPError as e:
         log.warning("PRISM delivery failed: %s", e)
+
+
+async def span(session_id: str, name: str, span_type: str, input_text: str, output_text: str, ok: bool = True) -> None:
+    """One-span trace; the council backend records each stage this way. Never raises."""
+    await trace(session_id, name, input_text, output_text, [], ok)

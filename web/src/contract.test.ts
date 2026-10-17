@@ -4,6 +4,8 @@ import {
   portfolioFile,
   sourceUrl,
   streamCouncil,
+  toChair,
+  toVerdict,
 } from "./contract";
 import { readFileSync } from "node:fs";
 
@@ -112,5 +114,82 @@ describe("POST SSE", () => {
     } finally {
       globalThis.fetch = prior;
     }
+  });
+});
+
+describe("council event mapping", () => {
+  const call = (ticker: string, signal: "BUY" | "HOLD" | "SELL") => ({
+    ticker,
+    signal,
+    conviction: "high" as const,
+    rationale: "",
+  });
+  it("takes the majority call, ties going to the top-weighted name", () => {
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "HOLD"), call("C", "HOLD")],
+      }).signal,
+    ).toBe("HOLD");
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "BUY")],
+      }).signal,
+    ).toBe("SELL");
+  });
+  it.each([undefined, []])("keeps absent calls pending (%j)", (positions) => {
+    expect(toVerdict({ member: "burry", positions }).signal).toBeUndefined();
+    expect(toChair({ positions }).overall_signal).toBeUndefined();
+  });
+  it.each(["low", "mid", "high"] as const)(
+    "preserves supplied %s conviction without numeric confidence",
+    (conviction) => {
+      const positions = [{ ...call("A", "BUY"), conviction }];
+      const verdict = toVerdict({ member: "burry", positions });
+      expect(verdict.positions).toEqual(positions);
+      expect(verdict).not.toHaveProperty("confidence");
+      const rulings = [{ ...positions[0], consensus: "Returned consensus" }];
+      expect(toChair({ positions: rulings }).positions).toEqual(rulings);
+    },
+  );
+  it("derives the ruling signal from the per-name rulings", () => {
+    const name = (signal: "BUY" | "HOLD" | "SELL") => ({
+      ticker: "X",
+      signal,
+      conviction: "low" as const,
+      consensus: "",
+    });
+    expect(
+      toChair({ positions: [name("BUY"), name("BUY"), name("SELL")] })
+        .overall_signal,
+    ).toBe("BUY");
+  });
+});
+
+describe("council event mapping", () => {
+  const call = (ticker: string, signal: "BUY" | "HOLD" | "SELL") => ({
+    ticker,
+    signal,
+    conviction: "high" as const,
+    rationale: "",
+  });
+  it("takes the majority call, ties going to the top-weighted name", () => {
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "HOLD"), call("C", "HOLD")],
+      }).signal,
+    ).toBe("HOLD");
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "BUY")],
+      }).signal,
+    ).toBe("SELL");
+  });
+  it("leaves the signal empty when a member has no calls", () => {
+    expect(toVerdict({ member: "burry" }).signal).toBeUndefined();
+    expect(toChair({}).overall_signal).toBeUndefined();
   });
 });

@@ -37,7 +37,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
         "ELEVENLABS_API_KEY": "voice-key",
         "ELEVENLABS_MODEL": "custom-model",
         **{f"ELEVENLABS_VOICE_{member.upper()}": f"voice-{member}"
-           for member in ("buffett", "cramer", "burry", "leopold")},
+           for member in ("buffett", "dalio", "burry", "leopold", "cramer", "chair")},
     }
     if origin:
         bindings["CORS_ORIGINS"] = origin
@@ -147,3 +147,15 @@ def test_invalid_secret_file_never_uploads(uploader, contents):
     assert result.returncode != 0
     assert not upload.exists()
     assert "abc" not in result.stdout + result.stderr
+
+
+def test_nicrron_model_defaults_to_opus(monkeypatch):
+    from app.services import llm
+
+    for value in (None, "", "nicrron/auto"):
+        monkeypatch.delenv("NICRRON_MODEL", raising=False)
+        if value is not None:
+            monkeypatch.setenv("NICRRON_MODEL", value)
+        assert llm.model() == "anthropic/claude-opus-5-5"
+    monkeypatch.setenv("NICRRON_MODEL", "other/model")
+    assert llm.model() == "other/model"

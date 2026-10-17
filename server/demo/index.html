@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Council demo</title>
+<style>
+  :root { --bg:#14110f; --panel:#1d1915; --line:#3a3128; --ink:#efe6d8; --muted:#a39580; --gold:#d4a54a;
+          --buy:#4caf7a; --hold:#d4a54a; --sell:#d9534f; font-family: ui-sans-serif, system-ui, sans-serif; }
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:12px 20px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0 12px 0 0; letter-spacing:.08em } header h1 span { color:var(--gold) }
+  input[type=text], textarea { background:#0f0d0b; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit }
+  button { background:var(--gold); color:#1a1408; border:0; border-radius:8px; padding:8px 14px; font:inherit; font-weight:600; cursor:pointer }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); font-weight:400 }
+  button:disabled { opacity:.45; cursor:not-allowed }
+  label.tog { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:13px }
+  main { display:grid; grid-template-columns: minmax(0,7fr) minmax(320px,3fr); height:calc(100vh - 58px) }
+  @media (max-width:900px){ main { grid-template-columns:1fr; height:auto } }
+  #table { padding:16px 20px; overflow:auto }
+  #brief { color:var(--muted); font-size:13px; margin:0 0 12px }
+  #seats { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px }
+  .seat { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; transition:border-color .2s }
+  .seat.speaking { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) }
+  .seat.chair { grid-column:1/-1 }
+  .seat h3 { margin:0; font-size:15px } .seat .role { color:var(--muted); font-size:12px }
+  .status { font-size:12px; color:var(--gold); margin:6px 0 } .plan { font-size:12px; color:var(--muted) }
+  .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-weight:700; font-size:12px; color:#111 }
+  .BUY { background:var(--buy) } .HOLD { background:var(--hold) } .SELL { background:var(--sell) }
+  .pips { letter-spacing:2px; color:var(--gold); margin-left:6px; font-size:12px }
+  .headline { font-weight:600; margin:8px 0 4px } .analysis { font-size:13px; color:#d8ccb9 }
+  ul { margin:6px 0; padding-left:18px; font-size:13px } details { font-size:12px; color:var(--muted) }
+  table.calls { width:100%; border-collapse:collapse; font-size:12px; margin:8px 0 }
+  table.calls td { border-top:1px solid var(--line); padding:4px 4px; vertical-align:top }
+  table.calls td:first-child { font-weight:700; width:48px } table.calls td.why { color:#d8ccb9 }
+  .label { font-size:11px; letter-spacing:.06em; color:var(--muted); text-transform:uppercase; margin-top:8px }
+  #chat { border-left:1px solid var(--line); display:flex; flex-direction:column; min-height:0; background:var(--panel) }
+  #log { flex:1; overflow:auto; padding:14px } .msg { margin:0 0 12px; font-size:14px; line-height:1.4 }
+  .msg .who { font-size:12px; color:var(--gold); font-weight:600 } .msg.user .who { color:var(--muted) }
+  .msg.system { color:var(--muted); font-size:12px; font-style:italic }
+  #chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 14px 0 }
+  #chips button { background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:12px; font-weight:400 }
+  #composer { display:flex; gap:8px; padding:10px 14px 14px; align-items:center }
+  #composer input { flex:1 }
+  .voice { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:12px; white-space:nowrap }
+  footer { padding:8px 20px; color:var(--muted); font-size:11px; border-top:1px solid var(--line) }
+</style>
+</head>
+<body>
+<header>
+  <h1>COUNCIL<span>.</span> demo</h1>
+  <button class="ghost" id="load">Load Jordan</button>
+  <input type="text" id="question" size="44" value="What should I do with my portfolio?" aria-label="Opening question">
+  <button id="convene" disabled>Convene the council</button>
+  <label class="tog"><input type="checkbox" id="roast"> Roast mode</label>
+  <label class="tog"><input type="checkbox" id="speak"> Speak replies</label>
+</header>
+<main>
+  <section id="table">
+    <p id="brief">Load Jordan's persona and connected brokerage, then convene the council.</p>
+    <div id="seats"></div>
+  </section>
+  <aside id="chat">
+    <div id="log"></div>
+    <div id="chips"></div>
+    <form id="composer">
+      <input type="text" id="text" placeholder="Ask the council... (name a member or @dalio)" autocomplete="off" disabled>
+      <button id="send" disabled>Send</button>
+      <span class="voice" title="Real-time voice chat via ElevenLabs is planned for v1"><input type="checkbox" disabled> Voice (v1)</span>
+    </form>
+  </aside>
+</main>
+<footer>Parody personas, not financial advice. Canned answers unless the server has NICRRON_API_KEY.</footer>
+<script>
+const MEMBERS = {
+  buffett: ["Warren Buffett", "Value · serious"], dalio: ["Ray Dalio", "Global macro · serious"],
+  burry: ["Michael Burry", "Contrarian · serious"], leopold: ["Leopold Aschenbrenner", "Thematic AI · intense"],
+  cramer: ["Jim Cramer", "Active trading · funny"], chair: ["The Chair", "Neutral coordinator"],
+};
+const TEMPLATES = [  // one chip per routing pattern (server/council/README.md)
+  "Burry, why sell PLTR?", "Buffett and Leopold disagree on NVDA. Settle it.", "What should I do with my $60k of savings?",
+  "Everyone: I'm retiring in 5 years. Does that change anything?", "Who was most bullish, and who disagreed?", "Roast my portfolio.",
+];
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+let files = null, runId = "", busy = false, audioQueue = Promise.resolve();
+
+function seat(m) {
+  const s = el("div", "seat" + (m === "chair" ? " chair" : "")); s.id = "seat-" + m;
+  s.append(el("h3", "", MEMBERS[m][0]), el("div", "role", MEMBERS[m][1]), el("div", "status", "Waiting"), el("div", "plan"), el("div", "body"));
+  return s;
+}
+function resetSeats() { $("seats").replaceChildren(...Object.keys(MEMBERS).map(seat)); }
+const part = (m, cls) => document.querySelector(`#seat-${m} .${cls}`);
+function badge(signal, conviction) {
+  const b = el("span"); b.append(el("span", "badge " + signal, signal));
+  if (conviction) b.append(el("span", "pips", { low: "●○○", mid: "●●○", high: "●●●" }[conviction] + " " + conviction));
+  return b;
+}
+function callsTable(rows) {  // rows: [ticker, signal, conviction, text]
+  const t = el("table", "calls");
+  rows.forEach(([ticker, signal, conviction, text]) => {
+    const tr = el("tr"), b = el("td"); b.append(badge(signal, conviction));
+    tr.append(el("td", "", ticker), b, el("td", "why", text)); t.append(tr);
+  });
+  return t;
+}
+function list(items) { const ul = el("ul"); items.forEach((t) => ul.append(el("li", "", t))); return ul; }
+function sources(items) {
+  const d = el("details"); d.append(el("summary", "", `Sources (${items.length})`));
+  items.forEach((s) => d.append(el("div", "", `${s.title}${s.quote ? " — " + s.quote : ""}`))); return d;
+}
+function say(who, text, cls = "") {
+  const m = el("div", "msg " + cls); if (who) m.append(el("div", "who", who)); m.append(el("div", "", text));
+  $("log").append(m); $("log").scrollTop = $("log").scrollHeight;
+}
+function chips(items) {
+  $("chips").replaceChildren(...items.map((t) => { const b = el("button", "", t); b.type = "button";
+    b.onclick = () => { $("text").value = t; $("text").focus(); }; return b; }));  // fills the input; the user edits, then sends
+}
+function speaking(m) { document.querySelectorAll(".seat").forEach((s) => s.classList.toggle("speaking", s.id === "seat-" + m)); }
+function play(url) {
+  if (!$("speak").checked) return;
+  audioQueue = audioQueue.then(() => new Promise((done) => { const a = new Audio(url); a.onended = a.onerror = done; a.play().catch(done); }));
+}
+function setBusy(b) { busy = b; $("convene").disabled = b || !files; $("send").disabled = $("text").disabled = b || !runId; }
+
+async function stream(path, body, onEvent) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read(); buf += dec.decode(value || new Uint8Array(), { stream: !done });
+    let i; while ((i = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+      const ev = frame.match(/^event: (.*)$/m)?.[1], data = frame.match(/^data: (.*)$/m)?.[1];
+      if (ev && data) onEvent(ev, JSON.parse(data));
+    }
+    if (done) break;
+  }
+}
+
+function onEvent(ev, d) {
+  switch (ev) {
+    case "run.started": runId = d.run_id; break;
+    case "orchestrator.plan": part(d.member, "plan").textContent = `Focus: ${d.focus_tickers.join(", ")} (+ shared ${d.shared_tickers.join(", ")}) · ${d.questions[0]}`; break;
+    case "member.status": part(d.member, "status").textContent = d.status; if (d.status === "speaking") speaking(d.member); if (d.status === "done") speaking(null); break;
+    case "member.analysis":
+      part(d.member, "body").replaceChildren(el("div", "label", "Portfolio analysis"), el("div", "headline", d.headline),
+        el("div", "analysis", d.analysis), el("div", "label", "Researching: " + d.names.join(", ")));
+      break;
+    case "member.verdict": {
+      part(d.member, "body").replaceChildren(el("div", "label", "Portfolio analysis"), el("div", "headline", d.headline),
+        el("div", "analysis", d.analysis), el("div", "label", "Calls on names (after research)"),
+        callsTable(d.positions.map((p) => [p.ticker, p.signal, p.conviction, p.rationale])),
+        el("div", "label", "Advice"), list(d.advice.map((a) => a.action)), sources(d.sources));
+      break;
+    }
+    case "chair.summary": {
+      part("chair", "body").replaceChildren(el("div", "headline", d.consensus), el("div", "analysis", d.summary),
+        el("div", "label", "Ruling per name"), callsTable(d.positions.map((r) => [r.ticker, r.signal, r.conviction,
+          r.consensus + " · " + Object.entries(r.calls).map(([m, s]) => `${MEMBERS[m][0].split(" ")[0]} ${s}`).join(", ")])),
+        el("div", "label", "Actions"), list(d.actions), el("div", "label", "Dissent"), list(d.dissent));
+      say("The Chair", d.summary); chips(d.suggestions.concat(TEMPLATES).slice(0, 6)); break;
+    }
+    case "chat.routed": say("", `→ ${d.members.map((m) => MEMBERS[m][0]).join(", ")} (${d.reason})`, "system"); break;
+    case "member.reply": say(MEMBERS[d.member][0], d.text); break;
+    case "chat.closed": if (d.text) say("The Chair", d.text); chips(d.suggestions); break;
+    case "member.audio": play(d.audio_url); break;
+    case "run.error": say("", "Error: " + d.message, "system"); break;
+  }
+}
+
+$("load").onclick = async () => {
+  const [p, persona] = await Promise.all(["portfolio.json", "PERSONA.md"].map((n) => fetch("/demo/data/" + n).then((r) => r.blob())));
+  files = { p, persona }; $("brief").textContent = "Jordan loaded: persona + connected brokerage (synthetic demo data)."; setBusy(false);
+};
+$("convene").onclick = async () => {
+  setBusy(true); runId = ""; resetSeats(); $("log").replaceChildren(); chips([]);
+  try {
+    const form = new FormData(); form.append("portfolio", files.p, "portfolio.json"); form.append("persona", files.persona, "PERSONA.md");
+    const r = await fetch("/api/ingest", { method: "POST", body: form });
+    if (!r.ok) throw new Error((await r.json()).detail);
+    const brief = await r.json(); $("brief").textContent = "Client brief: " + brief.summary;
+    say("You", $("question").value, "user");
+    await stream("/api/council/run", { brief_id: brief.brief_id, question: $("question").value, roast: $("roast").checked }, onEvent);
+  } catch (e) { say("", "Error: " + e.message, "system"); }
+  setBusy(false); $("text").focus();
+};
+$("composer").onsubmit = async (e) => {
+  e.preventDefault(); const text = $("text").value.trim(); if (!text || busy) return;
+  $("text").value = ""; say("You", text, "user"); setBusy(true);
+  try { await stream("/api/council/chat", { run_id: runId, text, roast: $("roast").checked }, onEvent); }
+  catch (err) { say("", "Error: " + err.message, "system"); }
+  setBusy(false); $("text").focus();
+};
+resetSeats(); chips(TEMPLATES);
+</script>
+</body>
+</html>

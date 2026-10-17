@@ -6,11 +6,13 @@ import type { CouncilEvent, Verdict } from "./contract";
 const verdict: Verdict = {
   member: "leopold",
   signal: "HOLD",
-  confidence: 0.7,
   headline: "Returned answer",
   reasons: [],
   sources: [],
   tickers: [],
+  analysis: "",
+  positions: [],
+  advice: [],
 };
 describe("stream-driven persona motion", () => {
   it("researches, reveals and speaks only while audio plays, then settles", () => {
@@ -52,6 +54,9 @@ describe("stream-driven persona motion", () => {
         overall_signal: "HOLD",
         consensus: "Returned consensus",
         dissent: [],
+        actions: [],
+        suggestions: [],
+        positions: [],
       },
     });
     expect(state).toEqual({ buffett: "drumming" });

@@ -12,33 +12,93 @@ export const members = {
   dalio: { name: "Ray Dalio", role: "The macro thinker" },
 } as const;
 export type Member = keyof typeof members;
+export type Speaker = Member | "chair";
+export type Signal = "BUY" | "HOLD" | "SELL";
+export type Conviction = "low" | "mid" | "high";
 export type Source = { title: string; url: string; quote?: string };
+export type Call = {
+  ticker: string;
+  signal: Signal;
+  conviction: Conviction;
+  rationale: string;
+};
+export type NameRuling = {
+  ticker: string;
+  signal: Signal;
+  conviction: Conviction;
+  consensus: string;
+};
 export type Verdict = {
   member: Member;
-  signal: "BUY" | "HOLD" | "SELL";
-  confidence: number;
+  signal?: Signal;
   headline: string;
   speech_bubble?: string;
   reasons: string[];
   sources: Source[];
   tickers: string[];
+  analysis: string;
+  positions: Call[];
+  advice: { action: string; why?: string }[];
 };
 export type Chair = {
-  overall_signal: Verdict["signal"];
+  overall_signal?: Signal;
   consensus: string;
   dissent: string[];
   summary: string;
   speech_bubble?: string;
+  actions: string[];
+  suggestions: string[];
+  positions: NameRuling[];
 };
 export type CouncilEvent =
   | { event: "run.started"; data: { run_id: string } }
-  | { event: "member.status"; data: { member: Member; status: string } }
+  | { event: "member.status"; data: { member: Speaker; status: string } }
   | { event: "member.source"; data: Source & { member: Member } }
   | { event: "member.verdict"; data: Verdict }
   | { event: "chair.summary"; data: Chair }
-  | { event: "member.audio"; data: { member: Member; audio_url: string } }
+  | { event: "member.audio"; data: { member: Speaker; audio_url: string } }
+  | { event: "chat.routed"; data: { members: Speaker[]; reason: string } }
+  | { event: "member.reply"; data: { member: Speaker; text: string } }
+  | { event: "chat.closed"; data: { text: string; suggestions: string[] } }
   | { event: "run.done"; data: { run_id: string } }
   | { event: "run.error"; data: { message: string } };
+
+// Majority signal; ties go to the call on the first (top-weighted) name.
+function majority(signals: Signal[]): Signal | undefined {
+  const counts = new Map<Signal, number>();
+  for (const signal of signals)
+    counts.set(signal, (counts.get(signal) || 0) + 1);
+  const top = Math.max(0, ...counts.values());
+  return signals.find((signal) => counts.get(signal) === top);
+}
+
+// Maps the server's five-member shapes onto the boardroom's view model.
+export function toVerdict(raw: Partial<Verdict>): Verdict {
+  const positions: Call[] = raw.positions || [];
+  return {
+    member: raw.member as Member,
+    signal: majority(positions.map((call) => call.signal)),
+    headline: raw.headline || "",
+    analysis: raw.analysis || "",
+    reasons: raw.reasons || [],
+    sources: raw.sources || [],
+    tickers: positions.map((call) => call.ticker),
+    positions,
+    advice: raw.advice || [],
+  };
+}
+export function toChair(raw: Partial<Chair>): Chair {
+  const positions: NameRuling[] = raw.positions || [];
+  return {
+    overall_signal: majority(positions.map((call) => call.signal)),
+    consensus: raw.consensus || "",
+    dissent: raw.dissent || [],
+    summary: raw.summary || "",
+    actions: raw.actions || [],
+    suggestions: raw.suggestions || [],
+    positions,
+  };
+}
 
 export function sourceUrl(url: string): string | undefined {
   try {
@@ -156,10 +216,17 @@ export async function streamCouncil(
         const parsed = JSON.parse(data);
         if (
           event.startsWith("member.") &&
-          !Object.hasOwn(members, parsed.member)
+          !Object.hasOwn(members, parsed.member) &&
+          parsed.member !== "chair"
         )
           throw new Error("The server returned an unknown council member.");
-        await receive({ event, data: parsed } as CouncilEvent);
+        const payload =
+          event === "member.verdict"
+            ? toVerdict(parsed)
+            : event === "chair.summary"
+              ? toChair(parsed)
+              : parsed;
+        await receive({ event, data: payload } as CouncilEvent);
         if (event === "run.error")
           throw new Error(parsed.message || "The council could not finish.");
         if (event === "run.done") completed = true;

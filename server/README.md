@@ -1,8 +1,11 @@
 # server - FastAPI backend (see [spec](../data/spec.md))
 
-Implements the spec's server-to-scene contract. With no `NICRRON_API_KEY` it streams deterministic canned
-events, so the frontend can build against it with no keys. Anchor search, Plaid and market data are stubs
-behind `app/services/`; PRISM tracing and Knowledge Base search no-op without `PRISMTRACE_API_KEY`. See [docs/prism.md](../docs/prism.md) for the PRISM proofs; `scripts/kb_seed.py` uploads the per-member Knowledge Base and `scripts/seed_runs.py` seeds runs.
+Implements the council described in [council/README.md](council/README.md): a neutral coordinator plus five
+specialists (Buffett, Dalio, Burry, Leopold, Cramer), then a routed text chat. With no `NICRRON_API_KEY` it streams deterministic canned
+events, so the frontend can build against it with no keys. Plaid and market data are stubs behind
+`app/services/`; specialist research uses PRISM Knowledge Base retrieval, not the unused Anchor stub.
+Tracing and retrieval no-op without both `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
+See [docs/prism.md](../docs/prism.md) for KB seeding and historical judging evidence.
 
 ## Run
 
@@ -12,6 +15,9 @@ uv sync --python 3.12
 uv run uvicorn app.main:app --reload --port 8000 --env-file ../.env   # --env-file optional
 uv run pytest
 ```
+
+Demo without the web app: open `http://localhost:8000/demo`, click **Load Jordan**, convene, then chat
+(template chips fill the input; the voice switch is a disabled v1 placeholder).
 
 ## Deploy (Cloudflare)
 
@@ -44,17 +50,16 @@ the live database with `npx wrangler d1 execute council --remote --command "SELE
 
 ## Env names
 
-Copy `../.env.example` to `../.env`. All optional.
+Copy `../.env.example` to `../.env`; the server loads it on startup (shell variables win). All optional.
 
 | name | effect |
 |---|---|
-| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); unset = canned events |
-| `ELEVENLABS_API_KEY` | server-only key for transcription and spoken replies; 503 when missing |
-| `ELEVENLABS_VOICE_BUFFETT` / `_CRAMER` / `_BURRY` / `_LEOPOLD` | optional member voice; overrides `ELEVENLABS_VOICE_ID` |
-| `ELEVENLABS_VOICE_ID` | optional shared voice; when unset, fetch an available premade voice from ElevenLabs (requires voice-list access) |
-| `ELEVENLABS_MODEL` | speech model, default `eleven_v4` via Text to Dialogue; existing TTS models such as `eleven_multilingual_v2` remain supported via Text to Speech |
-| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM trace + span per member |
-| `COUNCIL_VERSION` | `v1` turns PRISM Knowledge Base retrieval off (the pre-KB backend, used to seed the PRISM comparison); default `v2`. Local only, not uploaded as a Worker secret |
+| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); no key = canned events. An unset model or `nicrron/auto` selects `anthropic/claude-opus-5-5`; other model names are used as given |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR` | `/api/voice/speak`; 503 until the key and that speaker's voice id are set |
+| `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
+| `NICRRON_CONCURRENCY` | max Nicrron calls in flight, default 4; 429s are retried with backoff |
+| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | key and project enable PRISM tracing and member-specific KB retrieval; host defaults to `https://prism.blockconvey.com` |
+| `COUNCIL_VERSION` | `v1` disables KB retrieval; default `v2`. Local only, not forwarded by the Worker |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the stubs; unused today |
 
@@ -63,7 +68,9 @@ Copy `../.env.example` to `../.env`. All optional.
 ```sh
 curl localhost:8000/api/health
 
-# ingest: CSV/JSON portfolio (cost_basis is per share) + persona.md
+# ingest: broker snapshot (data/portfolio.json shape) or CSV/JSON holdings (cost_basis per share) + persona.md
+curl -F portfolio=@../data/portfolio.json -F persona=@../data/PERSONA.md localhost:8000/api/ingest
+# -> {"brief_id":"...","summary":"$283,741 in PLTR, SPY, NVDA, TSLA +10 more, +23%; $18,431 cash; Jordan Mitchell, 38"}
 printf 'ticker,shares,cost_basis\nVOO,20,714.29\n' > portfolio.csv
 printf '# Alex\n10-year horizon, moderate risk\n' > persona.md
 curl -F portfolio=@portfolio.csv -F persona=@persona.md -F plaid=true localhost:8000/api/ingest
@@ -73,9 +80,10 @@ curl -F portfolio=@portfolio.csv -F persona=@persona.md -F plaid=true localhost:
 curl -N -X POST localhost:8000/api/council/run -H 'content-type: application/json' \
   -d '{"brief_id":"<brief_id>","question":"Keep dollar-cost averaging, sell, or move?"}'
 
-# follow-up to one member; run_id is in the run.started event
-curl -N -X POST localhost:8000/api/council/ask -H 'content-type: application/json' \
-  -d '{"run_id":"<run_id>","member":"burry","question":"Why sell?"}'
+# chat turn after the run (run_id is in run.started); the coordinator routes unless "to" names members
+curl -N -X POST localhost:8000/api/council/chat -H 'content-type: application/json' \
+  -d '{"run_id":"<run_id>","text":"Burry and Leopold disagree on NVDA. Settle it."}'
+# /api/council/ask {"run_id","member","question"} still works: a chat turn with to=[member]
 
 # speech
 curl -X POST localhost:8000/api/voice/speak -H 'content-type: application/json' \
@@ -86,38 +94,26 @@ curl -F file=@question.webm localhost:8000/api/voice/transcribe
 # -> {"text":"<actual ElevenLabs transcript>"}
 ```
 
-## Voice conversations
+Run events, in order: `run.started`; `orchestrator.plan` per member (`member`, `focus_tickers`, `shared_tickers`,
+`questions`); then the five members in parallel, each in three stages:
+`member.status` researching -> lens `member.source` -> analysing -> `member.analysis` (`headline`, `analysis`,
+`reasons`, `names`; no calls) -> checking names -> per-name `member.source` (with `ticker`) -> deciding ->
+`member.verdict` (the analysis plus `positions[]`: `ticker`, `signal`, `conviction` low/mid/high, `rationale`;
+`advice[]`; `sources`). Then `chair.summary` (`consensus`, per-name `positions[]` rulings with `calls`,
+`signal`, `conviction`, `consensus`; `dissent`, `actions`, `summary`, `suggestions`); a speaking ->
+`member.audio` -> done triple per member, then the chair; `run.done` (or `run.error`).
 
-In the chat panel, select **Speak your question**, allow microphone access, then select
-**Stop recording**. Scribe v2 transcribes the recording into the question field. Existing typed text is
-preserved; review and send with the chat send button. Reply to a member's returned message to direct
-your next spoken question to that member. Replies play in order when
-**Sound on** is enabled. The audio controls let you pause or replay the latest reply; **Sound off** skips
-automatic playback. This is push-to-talk, with a review step before each question is sent.
+Chat events: `run.started`; `chat.routed` (`members`, `reason`; `["chair"]` = the coordinator answers itself);
+per speaker `member.reply` (`member`, `text`, `sources`) and its audio triple; `chat.closed` (`text`, `suggestions`);
+`run.done`.
 
-Recording requires HTTPS (or localhost), browser microphone permission and MediaRecorder support.
-The microphone stops after 60 seconds, on errors or when the form unmounts. Uploads over 5 MB, unsupported
-formats and empty recordings return explicit errors. Provider failures preserve your typed question and
-the council transcript. There is no browser speech-recognition fallback or fabricated transcription.
-
-The browser sends recordings only to `/api/voice/transcribe`; the server sends them to ElevenLabs using
-`scribe_v2`. Speech uses `eleven_v4` by default, with long replies split into requests of at most 2,000
-characters. Audio and text incur ElevenLabs usage. Each voice operation sends a tool trace to PRISM,
-including the actual model, transcript or audio byte count, and failure status; raw audio is not sent to
-PRISM. Voice traces currently have independent session IDs. Keys never reach the browser. A restricted
-key needs Speech to Text and speech-generation access, plus voice-list access unless a voice ID is set.
-
-Model references: [ElevenLabs models](https://elevenlabs.io/docs/overview/models),
-[Scribe transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert),
-[Text to Dialogue](https://elevenlabs.io/docs/api-reference/text-to-dialogue/convert).
-
-Events and payloads are the spec's table. Order: `run.started`; the three other members in parallel
-(`member.status` researching -> `member.source` -> thinking -> `member.verdict`); then Warren's own
-verdict; `chair.summary`; a `member.status` speaking -> `member.audio` -> done triple per member
-(`member.audio.audio_url` is `GET /api/voice/speak?member=&text=`, playable in an `<audio>` tag);
-`run.done` (or `run.error`).
+Payload schemas live in [`app/models.py`](app/models.py); coordinator behavior is described in
+[council/README.md](council/README.md). The frontend's presentation and follow-up controls are documented
+in the [web journey](../web/README.md#journey).
 
 ## Known limits
 
 For storage limits, see [Deploy (Cloudflare)](#deploy-cloudflare). No answer caching or replay yet;
-canned `member.audio` URLs 503 without an ElevenLabs key; sources are the Anchor stub's placeholder.
+canned `member.audio` URLs 503 without ElevenLabs keys; KB sources are empty without configured,
+available member documents (there is no live web-search fallback);
+chat replies arrive whole (no token streaming); `/demo` is a dev page, not the product UI.

@@ -92,7 +92,9 @@ export default function Boardroom({
               >
                 <SignalIcon signal={signal} />
                 <span className="bubble-copy">
-                  <small>{ruling ? "Final word" : signal || "Pending"}</small>
+                  <small>
+                    {ruling ? "Council ruling" : signal || "Pending"}
+                  </small>
                   <span className="bubble-line">{line}</span>
                   <span className="bubble-more">View more ↗</span>
                 </span>

@@ -17,6 +17,7 @@ import type {
   CouncilEvent,
   Member,
   Source,
+  Speaker,
   Verdict,
 } from "./contract";
 import VoiceInput from "./VoiceInput";
@@ -52,20 +53,35 @@ function VerdictCard({
     <article className="verdict-card">
       <div className="card-top">
         <span>{members[verdict.member].name}</span>
-        <span className={`signal ${verdict.signal.toLowerCase()}`}>
-          {verdict.signal}
-        </span>
+        {verdict.signal && (
+          <span className={`signal ${verdict.signal.toLowerCase()}`}>
+            {verdict.signal}
+          </span>
+        )}
       </div>
       <h3>{bubbleLine(verdict.speech_bubble || verdict.headline)}</h3>
       <p className="muted">
-        {Math.round(verdict.confidence * 100)}% confidence
-        {verdict.tickers.length ? ` · ${verdict.tickers.join(", ")}` : ""}
+        {verdict.positions.length
+          ? verdict.positions
+              .map(
+                (call) => `${call.ticker} ${call.signal} · ${call.conviction}`,
+              )
+              .join(" · ")
+          : "No calls returned."}
       </p>
       <details open={open || undefined}>
         <summary>
           View more <span>↗</span>
         </summary>
-        <p>{verdict.headline}</p>
+        <p>{verdict.analysis || verdict.headline}</p>
+        {verdict.positions.map((call) => (
+          <p key={call.ticker}>
+            <b className={`signal ${call.signal.toLowerCase()}`}>
+              {call.ticker} {call.signal}
+            </b>{" "}
+            <small>{call.conviction} conviction</small> {call.rationale}
+          </p>
+        ))}
         <ul className="reasons">
           {verdict.reasons.map((reason, i) => (
             <li key={i}>{reason}</li>
@@ -88,15 +104,29 @@ function ChairRuling({
   return (
     <article className="ruling">
       <div className="card-top">
-        <h2>Warren’s ruling</h2>
-        <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
-          {chair.overall_signal}
-        </span>
+        <h2>Council ruling</h2>
+        {chair.overall_signal && (
+          <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
+            {chair.overall_signal}
+          </span>
+        )}
       </div>
       <p>{bubbleLine(chair.speech_bubble || chair.summary)}</p>
       <details open={open || undefined}>
         <summary>View more ↗</summary>
         <p>{chair.summary}</p>
+        {chair.positions.length > 0 && (
+          <p className="ruling-chips">
+            {chair.positions.map((name) => (
+              <b
+                key={name.ticker}
+                className={`signal ${name.signal.toLowerCase()}`}
+              >
+                {name.ticker} {name.signal} · {name.conviction}
+              </b>
+            ))}
+          </p>
+        )}
         <h4>Consensus</h4>
         <p>{chair.consensus}</p>
         <h4>Dissent</h4>
@@ -108,6 +138,16 @@ function ChairRuling({
           </ul>
         ) : (
           <p>No dissent returned.</p>
+        )}
+        {chair.actions.length > 0 && (
+          <>
+            <h4>Actions</h4>
+            <ul>
+              {chair.actions.map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
+            </ul>
+          </>
         )}
       </details>
     </article>
@@ -177,8 +217,11 @@ export default function App() {
       | { kind: "user"; text: string }
       | { kind: "verdict"; verdict: Verdict }
       | { kind: "chair"; chair: Chair }
+      | { kind: "routed"; members: Speaker[]; reason: string }
+      | { kind: "reply"; member: Speaker; text: string }
     )[]
   >([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [audioMessage, setAudioMessage] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const controller = useRef<AbortController | null>(null);
@@ -443,7 +486,8 @@ export default function App() {
         }));
         if (event.data.status === "researching")
           setStage("The council is doing its homework.");
-        if (event.data.status === "speaking") setActive(event.data.member);
+        if (event.data.status === "speaking" && event.data.member !== "chair")
+          setActive(event.data.member);
         if (event.data.status === "done")
           setActive((previous) =>
             previous === event.data.member ? undefined : previous,
@@ -489,10 +533,32 @@ export default function App() {
           setAnimation((previous) =>
             animateEvent(previous, { event: "chair.revealed" }),
           );
-          setStage("Warren’s ruling is in.");
+          setSuggestions(event.data.suggestions);
+          setStage("The council ruling is in.");
         }
         break;
+      case "chat.routed":
+        setMessages((previous) => [
+          ...previous,
+          { kind: "routed", ...event.data },
+        ]);
+        break;
+      case "member.reply":
+        setMessages((previous) => [
+          ...previous,
+          { kind: "reply", member: event.data.member, text: event.data.text },
+        ]);
+        break;
+      case "chat.closed":
+        if (event.data.text)
+          setMessages((previous) => [
+            ...previous,
+            { kind: "reply", member: "chair", text: event.data.text },
+          ]);
+        setSuggestions(event.data.suggestions);
+        break;
       case "member.audio":
+        if (event.data.member === "chair") break;
         if (voiceEnabled.current && soundEnabled.current) {
           await playAudio(event.data.audio_url, signal, event.data.member);
         } else {
@@ -517,11 +583,10 @@ export default function App() {
         break;
     }
   }
-  async function execute() {
-    if (busy || voiceBusy || loadingContext || !context || !question.trim())
-      return;
-    const message = question.trim();
-    const follow = !!replyTo && !!runId && runFinished;
+  async function execute(text = question) {
+    if (busy || voiceBusy || loadingContext || !context || !text.trim()) return;
+    const message = text.trim();
+    const follow = !!runId && runFinished;
     const abort = new AbortController();
     controller.current = abort;
     const timedOut = () => abort.abort("The council timed out. Please retry.");
@@ -546,13 +611,13 @@ export default function App() {
       await checkVoice(abort.signal);
       abort.signal.throwIfAborted();
       if (follow) {
-        setSources((previous) => ({ ...previous, [replyTo!]: [] }));
+        setSuggestions([]);
         await streamCouncil(
-          "/api/council/ask",
+          "/api/council/chat",
           {
             run_id: runId,
-            member: replyTo,
-            question: message,
+            text: message,
+            to: replyTo ? [replyTo] : [],
             roast,
           },
           abort.signal,
@@ -560,6 +625,7 @@ export default function App() {
         );
       } else {
         setRunId("");
+        setSuggestions([]);
         setChair(undefined);
         setVerdicts({});
         setSources({});
@@ -764,6 +830,34 @@ export default function App() {
                   <small>You</small>
                   <p>{message.text}</p>
                 </article>
+              ) : message.kind === "routed" ? (
+                <p className="chat-status" key={index}>
+                  Asking{" "}
+                  {message.members
+                    .map((member) =>
+                      member === "chair"
+                        ? "the chair"
+                        : members[member].name.split(" ").pop(),
+                    )
+                    .join(" and ")}{" "}
+                  · {message.reason}
+                </p>
+              ) : message.kind === "reply" ? (
+                <article className="chat-message member-message" key={index}>
+                  <img
+                    className="chat-avatar"
+                    src={`/portraits/${message.member === "chair" ? "buffett" : message.member}.png`}
+                    alt=""
+                  />
+                  <div>
+                    <small>
+                      {message.member === "chair"
+                        ? "The chair"
+                        : members[message.member].name}
+                    </small>
+                    <p>{message.text}</p>
+                  </div>
+                </article>
               ) : (
                 <article className="chat-message member-message" key={index}>
                   <img
@@ -802,6 +896,19 @@ export default function App() {
             <div ref={transcriptEnd} />
           </div>
           <div className="chat-composer">
+            {suggestions.length > 0 && !busy && (
+              <div className="chips">
+                {suggestions.map((chip) => (
+                  <button
+                    type="button"
+                    key={chip}
+                    onClick={() => void execute(chip)}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            )}
             {error && (
               <p className="error" role="alert">
                 {error}
@@ -916,11 +1023,12 @@ export default function App() {
         <MemberDialog onClose={() => setSelected(undefined)}>
           <p className="eyebrow">{members[selected].role}</p>
           <h2>{members[selected].name}</h2>
-          {selected === "buffett" && chair ? (
+          {selected === "buffett" && chair && (
             <ChairRuling chair={chair} open />
-          ) : selectedVerdict ? (
+          )}
+          {selectedVerdict ? (
             <VerdictCard verdict={selectedVerdict} open />
-          ) : (
+          ) : selected === "buffett" && chair ? null : (
             <>
               <p className="muted">
                 {statuses[selected] ||

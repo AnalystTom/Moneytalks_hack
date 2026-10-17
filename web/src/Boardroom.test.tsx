@@ -29,10 +29,12 @@ const verdict = (
   member,
   signal,
   headline,
-  confidence: 0.8,
   reasons: [],
   sources: [],
   tickers: [],
+  analysis: "",
+  positions: [],
+  advice: [],
 });
 
 describe("cartoon boardroom", () => {
@@ -119,6 +121,9 @@ describe("cartoon boardroom", () => {
           summary: "Returned final summary",
           consensus: "Returned consensus",
           dissent: [],
+          actions: [],
+          suggestions: [],
+          positions: [],
         }}
         onSelect={() => {}}
       />,
@@ -126,7 +131,7 @@ describe("cartoon boardroom", () => {
     expect(html).toContain("researching");
     expect(html).toContain("Reviewing 1 source…");
     expect(html).toContain("Returned final summary");
-    expect(html).toContain("Final word");
+    expect(html).toContain("Council ruling");
     expect(html).not.toContain("Earlier verdict");
   });
 });

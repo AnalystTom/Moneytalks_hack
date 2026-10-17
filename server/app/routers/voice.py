@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
-from app.models import Member, SpeakRequest
+from app.models import SpeakRequest, Speaker
 from app.services import elevenlabs
 
 router = APIRouter(prefix="/voice")
@@ -39,5 +39,5 @@ async def post_speak(req: SpeakRequest) -> Response:
 
 
 @router.get("/speak")  # the `audio_url` in member.audio events points here so an <audio> tag can play it
-async def get_speak(member: Member, text: str = Query(min_length=1, max_length=2500)) -> Response:
+async def get_speak(member: Speaker, text: str = Query(min_length=1, max_length=2500)) -> Response:
     return await _speak(member, text)

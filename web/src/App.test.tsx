@@ -77,11 +77,13 @@ async function idle() {
 const verdict: Verdict = {
   member: "buffett",
   signal: "HOLD",
-  confidence: 0.8,
   headline: "Returned portfolio answer. More context for details.",
   reasons: ["Returned reason"],
   sources: [],
   tickers: [],
+  analysis: "",
+  positions: [],
+  advice: [],
 };
 async function replySession() {
   vi.mocked(streamCouncil).mockImplementationOnce(
@@ -255,7 +257,7 @@ it.each([
       await vi.importActual<typeof import("./contract")>("./contract");
     vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
     vi.mocked(fetch).mockImplementation(async (input, options) => {
-      if (input === "/api/council/run" || input === "/api/council/ask")
+      if (input === "/api/council/run" || input === "/api/council/chat")
         return streamed
           ? new Response(
               `event: run.error\ndata: ${JSON.stringify({ message: detail })}\n\n`,
@@ -331,6 +333,9 @@ it("shows real returned answers and ruling as avatar messages with full details"
           summary: "Returned final ruling",
           consensus: "Returned consensus",
           dissent: ["Returned dissent"],
+          actions: [],
+          suggestions: [],
+          positions: [],
         },
       });
       await receive({ event: "run.done", data: { run_id: "parent" } });
