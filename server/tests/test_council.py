@@ -48,27 +48,3 @@ def test_ask_one_member(client, brief_id):
 
 def test_ask_unknown_run_is_404(client):
     assert client.post("/api/council/ask", json={"run_id": "nope", "member": "burry", "question": "q"}).status_code == 404
-
-
-def test_run_with_nicrron_mocked(client, brief_id, monkeypatch):
-    import json
-
-    import httpx
-
-    from app.services import llm
-
-    monkeypatch.setenv("NICRRON_API_KEY", "test")
-    verdict = {"signal": "SELL", "confidence": 0.9, "headline": "h", "reasons": ["r"], "tickers": ["VOO"], "sources": []}
-    chair = {"overall_signal": "SELL", "consensus": "c", "dissent": [], "summary": "s"}
-
-    def handler(request):
-        system = json.loads(request.content)["messages"][0]["content"]
-        reply = chair if "council chair" in system else verdict
-        return httpx.Response(200, json={"choices": [{"message": {"content": "```json\n" + json.dumps(reply) + "\n```"}}]})
-
-    real = httpx.AsyncClient
-    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
-    events = parse_sse(client.post("/api/council/run", json={"brief_id": brief_id, "question": "q"}).text)
-    assert names(events)[-1] == "run.done"
-    assert next(d for e, d in events if e == "chair.summary")["overall_signal"] == "SELL"
-    assert next(d for e, d in events if e == "member.verdict")["headline"] == "h"

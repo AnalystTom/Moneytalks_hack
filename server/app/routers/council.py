@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.models import AskRequest, RunRequest
-from app.services import council, ingest
+from app.services import council, ingest, personas
 
 router = APIRouter(prefix="/council")
 HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -26,4 +26,6 @@ async def ask(req: AskRequest) -> StreamingResponse:
     prior = council.RUNS.get(req.run_id)
     if not prior:
         raise HTTPException(404, "unknown run_id")
+    if req.member not in personas.load():
+        raise HTTPException(422, f"unknown member {req.member!r}")
     return _sse(council.ask(prior, req.run_id, req.member, req.question, req.roast))

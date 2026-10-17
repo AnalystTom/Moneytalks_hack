@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Member = Literal["buffett", "cramer", "burry", "leopold"]
+Member = str  # a persona id from agents/personas, checked against services.personas at the router
 Signal = Literal["BUY", "HOLD", "SELL"]
 
 
@@ -19,6 +19,7 @@ class Verdict(BaseModel):
     reasons: list[str]
     sources: list[Source] = []
     tickers: list[str] = []
+    line: str = ""  # the short speech-bubble line the member says aloud
 
 
 class Chair(BaseModel):

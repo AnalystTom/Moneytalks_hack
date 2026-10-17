@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
-from app.config import env, voice_id, MEMBERS
+from app.config import env, model
+from app.services import anchor, elevenlabs
 
 router = APIRouter()
 
@@ -9,7 +10,8 @@ router = APIRouter()
 async def health() -> dict:
     return {
         "ok": True,
-        "llm": "nicrron" if env("NICRRON_API_KEY") else "canned",
-        "voice": bool(env("ELEVENLABS_API_KEY")) and all(voice_id(m) for m in MEMBERS),
-        "prism": bool(env("PRISMTRACE_API_KEY")),
+        "llm": model() if env("NICRRON_API_KEY") else "canned",
+        "voice": elevenlabs.enabled(),
+        "prism": bool(env("PRISMTRACE_API_KEY") and env("PRISMTRACE_PROJECT_ID")),
+        "search": anchor.enabled(),
     }

@@ -2,12 +2,14 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from app.models import Member, SpeakRequest
-from app.services import elevenlabs
+from app.services import elevenlabs, personas
 
 router = APIRouter(prefix="/voice")
 
 
 async def _speak(member: str, text: str) -> Response:
+    if member not in personas.load():
+        raise HTTPException(422, f"unknown member {member!r}")
     try:
         return Response(await elevenlabs.speak(member, text), media_type="audio/mpeg")
     except elevenlabs.VoiceError as e:

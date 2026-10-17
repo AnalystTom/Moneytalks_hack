@@ -65,7 +65,7 @@ Events (`event:` name, JSON `data:`):
 
 ## Council members
 
-One file per member in `server/council/<member>.md`: philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, _Situational Awareness_ for Leopold).
+One file per member in `server/agents/personas/<name>.md` (with `server/agents/orchestrator.md` and the tools in `server/agents/skill.md`): philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, _Situational Awareness_ for Leopold).
 
 ## Stack
 
