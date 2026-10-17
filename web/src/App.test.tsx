@@ -256,6 +256,9 @@ it.each([
     const { streamCouncil: requestCouncil } =
       await vi.importActual<typeof import("./contract")>("./contract");
     vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
+    // A lost brief is re-ingested and retried once, so the retry must fail too.
+    if (!follow)
+      vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
     vi.mocked(fetch).mockImplementation(async (input, options) => {
       if (input === "/api/council/run" || input === "/api/council/chat")
         return streamed
@@ -320,6 +323,35 @@ it.each([
     expect(vi.getTimerCount()).toBe(0);
   },
 );
+
+it("silently re-ingests a lost brief and retries the question once", async () => {
+  vi.useFakeTimers();
+  vi.mocked(streamCouncil)
+    .mockRejectedValueOnce(new Error("unknown brief_id"))
+    .mockImplementationOnce(async (_, __, ___, receive) => {
+      await receive({ event: "run.started", data: { run_id: "again" } });
+      await receive({ event: "run.done", data: { run_id: "again" } });
+    });
+  const fetchContext = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, options) =>
+    input === "/api/ingest"
+      ? Response.json({ brief_id: "fresh", summary: "Portfolio received" })
+      : fetchContext(input, options),
+  );
+  submit("chat-form");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(streamCouncil).toHaveBeenCalledTimes(2);
+  expect(streamCouncil).toHaveBeenLastCalledWith(
+    "/api/council/run",
+    { brief_id: "fresh", question: "Should I hold?", roast: false },
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+  expect(() => get("className", "error")).toThrow("Missing");
+  expect(get("className", "context-chip").children).toBe(
+    "Jordan’s portfolio loaded",
+  );
+});
 
 it("shows real returned answers and ruling as avatar messages with full details", async () => {
   vi.useFakeTimers();
