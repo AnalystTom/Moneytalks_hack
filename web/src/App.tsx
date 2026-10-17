@@ -234,7 +234,9 @@ export default function App() {
       let timeout = setTimeout(stalled, 30000);
       signal.addEventListener("abort", finish, { once: true });
       player.onended = finish;
-      player.onpause = finish;
+      player.onpause = () => {
+        if (!player.ended) finish();
+      };
       player.onplaying = () => {
         if (!settled) setAudioMessage("");
       };

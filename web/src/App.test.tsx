@@ -164,6 +164,7 @@ describe("spoken answers", () => {
     const player = {
       src: "",
       currentTime: 0,
+      ended: false,
       onended: null as (() => void) | null,
       onpause: null as (() => void) | null,
       onplaying: null as (() => void) | null,
@@ -193,7 +194,7 @@ describe("spoken answers", () => {
   }
 
   it.each([false, true])(
-    "lets progressing speech finish naturally (follow-up: %s)",
+    "finishes progressing speech through pause, microtasks, then ended (follow-up: %s)",
     async (follow) => {
       if (follow) {
         submit("brief-form");
@@ -230,9 +231,17 @@ describe("spoken answers", () => {
           player.ontimeupdate?.();
         }
         expect(player.pause).toHaveBeenCalledTimes(i);
-        player.currentTime = 0;
+        player.ended = true;
+        const source = player.src;
+        player.onpause!();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(player.play).toHaveBeenCalledTimes(i + 1);
+        expect(player.pause).toHaveBeenCalledTimes(i);
+        expect(player.src).toBe(source);
         player.onended!();
         await vi.advanceTimersByTimeAsync(0);
+        player.ended = false;
+        player.currentTime = 0;
       }
       expect(player.pause).toHaveBeenCalledTimes(speakers.length);
       expect(get("className", "follow-form")).toBeDefined();
