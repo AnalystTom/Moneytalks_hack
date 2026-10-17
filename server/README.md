@@ -17,7 +17,7 @@ persona file then runs in parallel, each with its own message context and its ow
 returns a cited verdict. The chair receives the full uploaded profile and holdings in both assignment and ruling phases.
 An unusable assignment leaves workers to research without a personalised assignment; an unusable ruling
 emits `run.error` instead of a computed replacement. Speech is requested through ElevenLabs when configured.
-Follow-ups give the named worker its earlier headline and reasons, plus access to the same brief through tools.
+Follow-ups give the named worker its latest completed verdict's headline and reasons, plus access to the same brief through tools.
 **Adding a council member requires a file in `agents/personas/` and frontend support for its id and presentation.** Roast mode only changes tone. Client holdings and profile come only from their uploaded brief. The specialist sheet comes from
 `data/specialist.csv` inside `server/` (override the folder with `DATA_DIR`).
 
@@ -85,6 +85,10 @@ Copy `../.env.example` to `../.env`. `NICRRON_API_KEY` is required for council a
 | `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for a future Plaid integration; unused today |
 
 ## Endpoints
+
+`GET /api/health` reports configuration: `llm` is the selected model id or `unavailable`, `voice` indicates an
+ElevenLabs key, `prism` indicates both required PRISM settings, and `search` indicates an Anchor key.
+`ok: true` reports that the endpoint responded; these fields do not verify provider connectivity or voice availability.
 
 ```sh
 curl localhost:8000/api/health

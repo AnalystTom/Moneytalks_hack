@@ -1,4 +1,4 @@
-"""Council members are the files in agents/personas/: adding a member is adding a file."""
+"""Load backend personas from agents/personas/; see server/README.md for adding a member."""
 from dataclasses import dataclass
 from functools import lru_cache
 

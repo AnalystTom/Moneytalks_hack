@@ -4,7 +4,7 @@ MONEY TALKS 2 hackathon, Money Intelligence track. Submission: Saturday 2026-10-
 
 ## Pitch
 
-You sit at the head of a boardroom table. A council of legendary investors - Warren Buffett, Jim Cramer, Michael Burry, Leopold Aschenbrenner, Ray Dalio - reads your portfolio, bank account and profile, researches live, and each gives you a cited Buy / Hold / Sell verdict.
+You sit at the head of a boardroom table. A council of legendary investors - Warren Buffett, Jim Cramer, Michael Burry, Leopold Aschenbrenner, Ray Dalio - reads your submitted holdings and profile, researches with the configured tools, and each gives you a cited Buy / Hold / Sell verdict.
 
 ICP: retail investors managing their own money.
 Not financial advice: the UI shows a persistent "parody personas, not financial advice" notice.
@@ -13,11 +13,11 @@ Not financial advice: the UI shows a persistent "parody personas, not financial 
 
 1. **User input (one step).** One screen collects all three sources, then one "Convene the council" button:
    - Stock portfolio: holdings upload (CSV or JSON: ticker, shares, cost basis).
-   - Bank account: Plaid Sandbox connection.
+   - Bank account: optional Plaid Sandbox request; see [current data availability](../server/README.md).
    - `persona.md`: the user's own profile (age, goals, horizon, risk tolerance, constraints).
-   - Demo shortcut: "Load Alex" prefills all three (portfolio $10,000 in an S&P 500 ETF, down 30%; Plaid sandbox account; Alex's `persona.md`).
+   - Demo shortcut: see [Load demo](../web/README.md#journey) for the bundled inputs and submitted fields.
    - Alex asks: "I'm down 30%. Keep dollar-cost averaging, sell, or move somewhere else?"
-2. **Ingest.** The server merges the three sources into one client brief and shows a one-line summary in chat ("$10k in VOO, -30%; $4.2k cash; 10-year horizon, moderate risk").
+2. **Ingest.** The server stores the submitted inputs in a client brief and shows a one-line summary in chat; see the [ingest example and unavailable-data states](../server/README.md#endpoints).
 3. **Council researches.** All five members research in parallel with separate contexts; linked web sources are available when Anchor is configured. The current scene has four portrait seats; Dalio appears in the member strip and transcript. Each speech bubble shows the member's current status, or a count of available sources when no status has arrived. Select a member to view source links in expanded details.
 4. **Verdicts.** Members reveal one by one: signal, confidence, headline, 2-3 reasons, cited sources.
    - Buffett - fundamentals
@@ -84,9 +84,9 @@ Persona files and orchestration are described in the [backend guide](../server/R
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Web search: Anchor.
 - Voice: ElevenLabs text-to-speech; see the [backend voice configuration](../server/README.md#agents).
-- Bank data: Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0).
+- Bank data: planned Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0). See [current data availability](../server/README.md).
 - Market data: TBD (current prices for holdings).
-- Financial-analysis skills: built by KJ; members call them through one shared tool interface (stubbed until KJ's piece lands).
+- Worker tools: see [tool guidance](../server/agents/skill.md); additional financial-analysis skills from KJ are planned.
 - PRISM (plain HTTP; the `prismtrace-sdk` Python package does not run inside Workers):
   - Current trace delivery and read-back: see the [backend guide](../server/README.md#agents).
   - Planned Knowledge Base: each member has its own uploaded documents; retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
