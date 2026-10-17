@@ -1,6 +1,6 @@
 # Council web
 
-React + Vite + TypeScript. See the [screen design](../data/spec.md#screen) for the boardroom layout and visual direction. Palette and typography are CSS variables in `src/style.css`.
+React + Vite + TypeScript with an HTML/CSS boardroom. Palette and typography are CSS variables in `src/style.css`.
 
 ## Run
 
@@ -24,17 +24,17 @@ Open the Vite URL (normally `http://127.0.0.1:5173`). `/api` proxies to FastAPI 
 
 ## Journey
 
-The app loads `data/portfolio.json` and `data/PERSONA.md` automatically through Vite development endpoints or emitted build assets, normalizes broker positions, and ingests them with the existing API. A small portfolio chip appears only after the server accepts the context. The paperclip replaces CSV/JSON holdings while retaining the profile, then clears the previous conversation only after the replacement is accepted. Context failures show an explicit error and retry action.
+The app loads `data/portfolio.json` and `data/PERSONA.md` automatically through Vite development endpoints or emitted build assets, normalizes broker positions, and ingests them with the existing API. The portfolio chip shows loading, unavailable or accepted context. The paperclip replaces CSV/JSON holdings while retaining the profile, then clears the previous conversation only after the replacement is accepted. Context failures show an explicit error; Retry is available when no accepted context remains.
 
 Send a message to run the council. Returned verdicts and Warren's ruling appear as avatar messages. Reply to a returned member message for a named-member follow-up; clear the recipient to ask the full council again. Failed or cancelled messages stay in the composer for retry. Roast mode is available in the header.
 
 Five cartoon members sit around the curved table. The current server supports four; Ray's seat stays empty until a real verdict arrives. No Ray opinion, confidence or source is supplied by the frontend. Stream events select idle, research, reveal, speaking and drum-roll poses. CSS transforms provide cutout motion and respect `prefers-reduced-motion`.
 
-Bubbles use the server's `speech_bubble` field when returned, otherwise a clean first-sentence preview capped at fifteen words and 100 characters. Select a bubble, portrait or nameplate to view the full answer, reasons and valid sources. Warren's final details include his overall signal, summary, consensus and dissent. Chat history retains earlier returned answers.
+Bubbles preview the server's `speech_bubble` field when returned, otherwise the verdict headline or Warren's summary. Either input is shortened to its first sentence, capped at fifteen words and 100 characters before any added ellipsis. Select a bubble, portrait or nameplate to view the full answer, reasons and valid sources. Warren's final details include his overall signal, summary, consensus and dissent. Chat history retains earlier returned answers.
 
 Voice is loaded only when `/api/health` explicitly reports `voice: true` and sound is enabled. Actual playback starts and stops the speaking pose; text-only runs use a short speaking beat. Playback failures disable further audio loads for that run. A clip with no playback progress for 30 seconds releases the stream. Pausing or cancelling releases playback.
 
-The checked-in context is demo data, not a connected bank account. The frontend never supplies financial verdicts, confidence, citations or balances itself and cannot certify the backend's research. Example-domain source URLs are excluded. Briefs and sessions remain in backend memory; refreshing reloads context.
+The checked-in context is demo data, not a connected bank account. The frontend never supplies financial verdicts, confidence, citations or balances itself and cannot certify the backend's research. Example-domain source URLs are excluded. See [deployment](../server/README.md#deploy-cloudflare) for backend storage limits. If context expires, Retry re-ingests the last accepted holdings and profile kept in this tab's memory; rejected replacements do not overwrite the accepted holdings. Refreshing clears the conversation and reloads the checked-in demo context.
 
 ## Checks
 
