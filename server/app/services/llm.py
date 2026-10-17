@@ -41,6 +41,7 @@ async def complete_text(system: str, user: str) -> str:
                 json={
                     "model": env("NICRRON_MODEL", "nicrron/auto"),
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    "max_tokens": 1500,  # bounds spend per call; a verdict JSON fits well inside it
                 },
             )
             if r.status_code not in RETRY_STATUS or attempt == ATTEMPTS - 1:

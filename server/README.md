@@ -3,7 +3,7 @@
 Implements the council described in [council/README.md](council/README.md): a neutral coordinator plus five
 specialists (Buffett, Dalio, Burry, Leopold, Cramer), then a routed text chat. With no `NICRRON_API_KEY` it streams deterministic canned
 events, so the frontend can build against it with no keys. Anchor search, Plaid and market data are stubs
-behind `app/services/`; PRISM tracing no-ops without `PRISMTRACE_API_KEY`.
+behind `app/services/`; PRISM tracing and Knowledge Base search no-op without `PRISMTRACE_API_KEY`. See [docs/prism.md](../docs/prism.md) for the PRISM proofs; `scripts/kb_seed.py` uploads the per-member Knowledge Base and `scripts/seed_runs.py` seeds runs.
 
 ## Run
 
@@ -56,7 +56,8 @@ Copy `../.env.example` to `../.env`; the server loads it on startup (shell varia
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR` | `/api/voice/speak`; 503 until the key and that speaker's voice id are set |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
 | `NICRRON_CONCURRENCY` | max Nicrron calls in flight, default 4; 429s are retried with backoff |
-| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM spans: plan, each member, verification failures, ruling, routing, each chat reply |
+| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM: one trace per member (lens search, Knowledge Base, name research, grounding check), plus plan, ruling, routing and chat spans; Knowledge Base retrieval in stage 1 |
+| `COUNCIL_VERSION` | `v1` turns PRISM Knowledge Base retrieval and the grounding rule off (the pre-KB backend, used to seed the PRISM comparison); default `v2`. Local only, not uploaded as a Worker secret |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the stubs; unused today |
 

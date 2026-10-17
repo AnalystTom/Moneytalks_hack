@@ -30,3 +30,8 @@ def env(name: str, default: str = "") -> str:
 
 def voice_id(member: str) -> str:
     return env(f"ELEVENLABS_VOICE_{member.upper()}")
+
+
+def council_version() -> str:
+    """"v1" turns PRISM Knowledge Base retrieval off (the pre-KB backend); anything else is "v2"."""
+    return "v1" if env("COUNCIL_VERSION") == "v1" else "v2"

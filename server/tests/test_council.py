@@ -267,3 +267,41 @@ def test_chat_survives_prose_and_failed_replies(client, jordan_brief_id, monkeyp
     assert replies[0]["text"] == "AMD has no catalyst. SELL it!"  # prose accepted as the reply
     assert replies[1]["text"]  # canned fallback instead of a dead turn
     assert next(d for e, d in events if e == "chat.closed")["suggestions"]
+
+
+def run_traces(client, brief_id, monkeypatch, version):
+    from app.services import prism
+
+    async def kb_search(agent_id, query, limit=3):
+        return [{"doc_name": "letter.md", "content": "book value fell 9.6%"}]
+
+    traces = []
+
+    async def trace(session_id, agent_id, input_text, output_text, steps, ok=True):
+        traces.append((agent_id, steps))
+
+    monkeypatch.setattr(prism, "kb_search", kb_search)
+    monkeypatch.setattr(prism, "trace", trace)
+    monkeypatch.setenv("COUNCIL_VERSION", version)
+    events = parse_sse(client.post("/api/council/run", json={"brief_id": brief_id, "question": "q"}).text)
+    return [(a, s) for a, s in traces if a.removeprefix("council.") in MEMBERS], events
+
+
+def test_v2_retrieves_from_knowledge_base_and_traces_it(client, jordan_brief_id, monkeypatch):
+    traces, events = run_traces(client, jordan_brief_id, monkeypatch, "v2")
+    assert sorted(a for a, _ in traces) == sorted(f"council.{m}" for m in MEMBERS)
+    assert all([n for n, *_ in steps] == ["anchor.search", "kb.search", "grounding.check"] for _, steps in traces)
+    assert all("book value fell 9.6%" in steps[1][3] for _, steps in traces)
+    assert any(d["url"] == "prism-kb://letter.md" for e, d in events if e == "member.source")
+
+
+def test_v1_skips_knowledge_base(client, jordan_brief_id, monkeypatch):
+    traces, _ = run_traces(client, jordan_brief_id, monkeypatch, "v1")
+    assert traces and all(steps[1][3] == "nothing retrieved" for _, steps in traces)
+
+
+def test_ungrounded_figures():
+    from app.services.grounding import ungrounded
+
+    assert ungrounded("Book value fell 9.6% to $70,530 in 2008", "fell 9.6% ... 70,530 ... 2008") == []
+    assert ungrounded("The S&P lost 38.5% in 2008", "fell 9.6% in 2008") == [38.5]

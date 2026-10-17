@@ -9,6 +9,7 @@ export const members = {
   },
   burry: { name: "Michael Burry", role: "The contrarian" },
   cramer: { name: "Jim Cramer", role: "The momentum man" },
+  dalio: { name: "Ray Dalio", role: "The macro thinker" },
 } as const;
 export type Member = keyof typeof members;
 export type Source = { title: string; url: string; quote?: string };
@@ -17,6 +18,7 @@ export type Verdict = {
   signal: "BUY" | "HOLD" | "SELL";
   confidence: number;
   headline: string;
+  speech_bubble?: string;
   reasons: string[];
   sources: Source[];
   tickers: string[];
@@ -26,6 +28,7 @@ export type Chair = {
   consensus: string;
   dissent: string[];
   summary: string;
+  speech_bubble?: string;
 };
 export type CouncilEvent =
   | { event: "run.started"; data: { run_id: string } }

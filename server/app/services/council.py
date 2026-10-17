@@ -8,9 +8,9 @@ import uuid
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
-from app.config import CHAIR, COUNCIL_DIR, MEMBERS
+from app.config import CHAIR, COUNCIL_DIR, MEMBERS, council_version
 from app.models import Advice, Analysis, Assignment, Chair, PositionCall, Source, Verdict
-from app.services import anchor, coordinator, llm, prism
+from app.services import anchor, coordinator, grounding, llm, prism
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +24,10 @@ QUERIES = {  # stage 1 research playbooks from council/<member>.md, filled with 
     "cramer": ["{0} next earnings date expectations", "{all} news catalyst", "{0} analyst upgrades downgrades this month"],
 }
 PER_NAME = ["{t} stock latest news", "{t} earnings results analyst rating valuation"]  # stage 2, for every name a member checks
+GROUNDING_RULE = (  # v2 only (COUNCIL_VERSION); v1 is the pre-KB baseline for the PRISM comparison
+    " Every number, price, percentage and date in your reply must appear verbatim in the client brief or the provided sources; "
+    "do not compute new figures or propose amounts (say 'a fixed monthly amount', not '$500'). If a figure is not provided, say so."
+)
 NEEDS_SEARCH = re.compile(r"\b(latest|today|news|now|this week|this month|earnings|just|recent)\b", re.I)
 
 CANNED = {  # no-LLM portfolio analysis; numbers are filled from the brief so they always pass verification
@@ -96,6 +100,10 @@ def sse(event: str, data: dict) -> str:
 
 def audio_url(member: str, text: str) -> str:
     return "/api/voice/speak?" + urlencode({"member": member, "text": text[:2500]})
+
+
+def _rules(schema: str) -> str:
+    return schema + " Keep every string under 40 words." + ("" if council_version() == "v1" else GROUNDING_RULE)
 
 
 def _persona(member: str) -> str:
@@ -198,7 +206,7 @@ async def _analyse(member: str, run_id: str, brief: dict, a: Assignment, roast: 
                       reasons=[_fill(text, f), f"Assignment: {a.questions[0]}"], names=_names(a.focus_tickers, a))
     if not llm.enabled():
         return canned
-    system = f"You are this council member:\n{_persona(member)}\n{ANALYSIS_SCHEMA}"
+    system = f"You are this council member:\n{_persona(member)}\n{_rules(ANALYSIS_SCHEMA)}"
     user = _roast(roast) + _brief_text(brief) + f"\nYour assignment: {a.model_dump_json()}\nSources: {_sources_json(sources)}"
     try:
         out = await _llm_checked(Analysis.model_validate, system, user, run_id, f"{member}.analysis", brief, sources)
@@ -217,7 +225,7 @@ async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bo
         PositionCall(ticker=t, **dict(zip(("signal", "conviction", "rationale"), _call(member, pos[t])))) for t in an.names
     ])
     if llm.enabled():
-        system = f"You are this council member:\n{_persona(member)}\n{ADVICE_SCHEMA}"
+        system = f"You are this council member:\n{_persona(member)}\n{_rules(ADVICE_SCHEMA)}"
         user = (
             _roast(roast) + _brief_text(brief) + f"\nYour portfolio analysis: {an.model_dump_json()}"
             + "".join(f"\nResearch on {t}: {_sources_json(s)}" for t, s in research.items())
@@ -235,22 +243,48 @@ async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bo
     return coordinator.check_calls(canned, list(pos), an.names)
 
 
-async def _member(member: str, run_id: str, brief: dict, a: Assignment, roast: bool, emit) -> Verdict:
+async def _knowledge(member: str, query: str, emit) -> tuple[list[dict], list[Source]]:
+    """The member's PRISM Knowledge Base (Berkshire letters, Situational Awareness, ...); off in v1."""
+    kb = [] if council_version() == "v1" else await prism.kb_search(f"council.{member}", query)
+    sources = [Source(title=r["doc_name"], url=f"prism-kb://{r['doc_name']}", quote=r["content"][:1200]) for r in kb]
+    for s in sources:
+        await emit("member.source", {"member": member, "title": s.title, "url": s.url, "ticker": None})
+    return kb, sources
+
+
+async def _member(member: str, run_id: str, brief: dict, a: Assignment, question: str, roast: bool, emit) -> Verdict:
     """Stage 1 analyse the portfolio -> stage 2 research each name -> stage 3 per-name calls + advice."""
     await emit("member.status", {"member": member, "status": "researching"})
     first, every = a.focus_tickers[0], " ".join(a.focus_tickers)
     lens = await _search(member, [q.format(first, all=every) for q in QUERIES[member]][:LENS_QUERIES], emit)
+    kb, kb_sources = await _knowledge(member, f"{question} {a.questions[0]}", emit)
     await emit("member.status", {"member": member, "status": "analysing"})
-    an = await _analyse(member, run_id, brief, a, roast, lens)
+    an = await _analyse(member, run_id, brief, a, roast, lens + kb_sources)
     await emit("member.analysis", {"member": member, **an.model_dump()})
     await emit("member.status", {"member": member, "status": "checking names"})
     found = await asyncio.gather(*(_search(member, [q.format(t=t) for q in PER_NAME][:NAME_QUERIES], emit, ticker=t) for t in an.names))
     research = dict(zip(an.names, found))
     await emit("member.status", {"member": member, "status": "deciding"})
-    verdict = await _advise(member, run_id, brief, an, roast, research, lens + [s for ss in found for s in ss])
-    await prism.span(run_id, f"council.{member}", "agent", json.dumps(a.questions), verdict.model_dump_json())
+    named = [s for ss in found for s in ss]
+    verdict = await _advise(member, run_id, brief, an, roast, research, lens + kb_sources + named)
+    await _trace_member(run_id, member, brief, question, a, lens + named, kb, verdict)
     await emit("member.verdict", {"member": member, **verdict.model_dump()})
     return verdict
+
+
+async def _trace_member(run_id: str, member: str, brief: dict, question: str, a: Assignment, web: list[Source], kb: list[dict], v: Verdict) -> None:
+    """One PRISM trace per member: web research, Knowledge Base retrieval, then the grounding check (PRISM proofs)."""
+    context = _brief_text(brief) + f"\nQuestion: {question}\nAssignment: {a.model_dump_json()}"
+    answer = (f"{v.headline}. {v.analysis} " + " ".join(f"{p.signal} {p.ticker} ({p.conviction}): {p.rationale}" for p in v.positions)
+              + " " + " ".join(x.action for x in v.advice))
+    bad = grounding.ungrounded(answer, context, " ".join(s.quote for s in v.sources))
+    steps = [
+        ("anchor.search", "tool", question, _sources_json(web)),
+        ("kb.search", "retrieval", question, "\n\n".join(f"[{r['doc_name']}] {r['content'][:1200]}" for r in kb) or "nothing retrieved"),
+        ("grounding.check", "guardrail", answer,
+         f"ungrounded figures: {', '.join(f'{b:g}' for b in bad)}" if bad else "every figure is in the client file or sources"),
+    ]
+    await prism.trace(run_id, f"council.{member}", context, answer, steps, ok=not bad)
 
 
 async def _rule(run_id: str, brief: dict, roast: bool, verdicts: dict[str, Verdict]) -> Chair:
@@ -316,7 +350,7 @@ def start_run(brief: dict, question: str, roast: bool) -> tuple[str, AsyncIterat
         plan = run["assignments"] = await _plan(run_id, brief)
         for m, a in plan.items():
             await emit("orchestrator.plan", {"member": m, **a.model_dump()})
-        results = await asyncio.gather(*(_member(m, run_id, brief, plan[m], roast, emit) for m in MEMBERS))
+        results = await asyncio.gather(*(_member(m, run_id, brief, plan[m], question, roast, emit) for m in MEMBERS))
         verdicts = run["verdicts"] = dict(zip(MEMBERS, results))
         run["sources"] = {m: v.sources for m, v in verdicts.items()}
         chair = run["chair"] = await _rule(run_id, brief, roast, verdicts)
@@ -377,7 +411,7 @@ async def _reply(member: str, run_id: str, run: dict, text: str, said: list[tupl
     if not llm.enabled():
         return _canned_reply(member, run, text, said, roast)
     v = run["verdicts"].get(member)
-    system = f"You are this council member:\n{_persona(member)}\n{REPLY_RULES}"
+    system = f"You are this council member:\n{_persona(member)}\n{REPLY_RULES}" + ("" if council_version() == "v1" else GROUNDING_RULE)
     user = (
         _roast(roast) + _brief_text(run["brief"]) + f"\nYour opening verdict: {v.model_dump_json() if v else 'none'}"
         + f"\nYour sources: {json.dumps([s.model_dump() for s in sources])}\n{_history(run)}"
