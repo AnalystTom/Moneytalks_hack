@@ -65,5 +65,3 @@ Individual subjects:
 ## Review environment
 
 Run browser testing on `big-machine-1` with an isolated profile. Never launch local review windows. Capture screenshots and a short working-flow video from the built UI before publishing a UI PR, then close only the processes created for that run. Remote verification results are recorded with the task evidence outside this worktree.
-
-The animation/chat task explicitly permits the cached local Chromium headless shell if remote access is unavailable. This permission does not extend to visible local windows. Record the actual test surface and verification limits with the evidence; local review is not remote or production deployment verification.

@@ -879,7 +879,7 @@ h4 {
 .speaking .member-portrait img {
   animation: persona-speak 0.48s ease-in-out infinite;
 }
-.drumming .member-portrait img {
+.council-seat.drumming .member-portrait img {
   animation: persona-drum 0.16s ease-in-out infinite alternate;
 }
 .revealing .speech-bubble {

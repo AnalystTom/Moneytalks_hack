@@ -558,13 +558,25 @@ export default function App() {
         );
       }
     } catch (cause) {
+      const expired =
+        !abort.signal.aborted &&
+        cause instanceof Error &&
+        ["unknown brief_id", "unknown run_id"].includes(cause.message);
+      if (expired) {
+        setContext(undefined);
+        setRunId("");
+        setRunFinished(false);
+        setReplyTo(undefined);
+      }
       setQuestion(message);
       setError(
         abort.signal.aborted
           ? String(abort.signal.reason || "Council cancelled.")
-          : cause instanceof Error
-            ? cause.message
-            : "The council could not connect.",
+          : expired
+            ? "Portfolio context expired. Retry loading it or replace the portfolio."
+            : cause instanceof Error
+              ? cause.message
+              : "The council could not connect.",
       );
       setStage("Session interrupted. You can retry.");
     } finally {

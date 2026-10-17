@@ -212,6 +212,86 @@ it("cancels during health loading before opening a stream and permits retry", as
   expect(streamCouncil).toHaveBeenCalledOnce();
 });
 
+it.each([
+  ["unknown brief_id", false, "reload", false],
+  ["unknown run_id", true, "replace", false],
+  ["unknown brief_id", false, "replace", true],
+  ["unknown run_id", true, "reload", true],
+] as const)(
+  "recovers from %s (follow-up: %s, recovery: %s, stream error: %s)",
+  async (detail, follow, recovery, streamed) => {
+    vi.useFakeTimers();
+    if (follow) await replySession();
+    const message = follow ? "Why hold?" : "Should I hold?";
+    const fetchContext = vi.mocked(fetch).getMockImplementation()!;
+    const { streamCouncil: requestCouncil } =
+      await vi.importActual<typeof import("./contract")>("./contract");
+    vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
+    vi.mocked(fetch).mockImplementation(async (input, options) => {
+      if (input === "/api/council/run" || input === "/api/council/ask")
+        return streamed
+          ? new Response(
+              `event: run.error\ndata: ${JSON.stringify({ message: detail })}\n\n`,
+              { headers: { "Content-Type": "text/event-stream" } },
+            )
+          : Response.json({ detail }, { status: 404 });
+      return fetchContext(input, options);
+    });
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get("className", "context-chip").children).toBe(
+      "Portfolio unavailable",
+    );
+    expect(get("id", "message").value).toBe(message);
+    expect(get("aria-label", "Send message").disabled).toBe(true);
+    expect(get("className", "error").children).toContain("context expired");
+    expect(() => get("className", "reply-target")).toThrow("Missing");
+    if (follow) expect(get("className", "reply-button").disabled).toBe(true);
+    const calls = vi.mocked(streamCouncil).mock.calls.length;
+    submit("chat-form");
+    expect(streamCouncil).toHaveBeenCalledTimes(calls);
+
+    vi.mocked(fetch).mockImplementation(async (input, options) =>
+      input === "/api/ingest"
+        ? Response.json({ brief_id: "fresh", summary: "Portfolio received" })
+        : fetchContext(input, options),
+    );
+    if (recovery === "reload") {
+      get("className", "context-retry").onClick!();
+    } else {
+      expect(get("aria-label", "Replace portfolio").disabled).toBe(false);
+      get("aria-label", "Replace portfolio").onChange!({
+        target: {
+          value: "",
+          files: [
+            new File(
+              ["ticker,shares,cost_basis\nAAPL,2,100"],
+              "replacement.csv",
+            ),
+          ],
+        },
+      });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get("className", "context-chip").children).toBe(
+      recovery === "reload"
+        ? "Jordan’s portfolio loaded"
+        : "replacement.csv loaded",
+    );
+    expect(get("aria-label", "Send message").disabled).toBe(false);
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streamCouncil).toHaveBeenLastCalledWith(
+      "/api/council/run",
+      { brief_id: "fresh", question: message, roast: false },
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(get("id", "message").value).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
 it("shows real returned answers and ruling as avatar messages with full details", async () => {
   vi.useFakeTimers();
   vi.mocked(streamCouncil).mockImplementationOnce(
@@ -230,7 +310,9 @@ it("shows real returned answers and ruling as avatar messages with full details"
     },
   );
   submit("chat-form");
-  await vi.advanceTimersByTimeAsync(2900);
+  await vi.advanceTimersByTimeAsync(1200);
+  expect(get("active", "buffett").animation).toEqual({ buffett: "drumming" });
+  await vi.advanceTimersByTimeAsync(1700);
   hooks.next = 0;
   const html = renderToStaticMarkup(App());
   for (const text of [
