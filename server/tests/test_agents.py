@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from app.services import council, elevenlabs, llm, personas, prism, tools
+from app.services import agents, council, elevenlabs, llm, personas, prism, tools
 from tests.conftest import parse_sse
 
 VERDICT = {"signal": "SELL", "confidence": 0.9, "headline": "h", "reasons": ["r"], "tickers": ["VOO"], "sources": [{"title": "portfolio_lookup", "url": "", "quote": "VOO"}], "line": "say this"}
@@ -221,6 +221,9 @@ async def test_voice_matches_name_then_falls_back(monkeypatch, caplog):
         with caplog.at_level("WARNING"):
             assert await elevenlabs.voice_for(c, "k", "burry") == "v-x"  # fallback voice named in the persona file
         assert "fallback" in caplog.text
+        with pytest.raises(elevenlabs.VoiceError, match="voice unavailable for cramer") as error:
+            await elevenlabs.voice_for(c, "k", "cramer")
+        assert error.value.status == 503
         monkeypatch.setenv("ELEVENLABS_VOICE_CRAMER", "v-env")
         assert await elevenlabs.voice_for(c, "k", "cramer") == "v-env"  # env override wins
 
@@ -402,3 +405,40 @@ async def test_cancellation_awaits_owned_speech_before_finishing_trace(fake, mon
         with pytest.raises(asyncio.CancelledError):
             await consumer
     assert stopped == active and finished == [False]
+
+
+@pytest.mark.parametrize("name", ["persona_profile", "portfolio_lookup", "specialist_row", "web_search"])
+async def test_worker_receives_and_can_cite_complete_large_tool_results(monkeypatch, name):
+    tail = "Need all this money next month."
+    source = {"title": name, "url": "", "quote": tail}
+    if name == "persona_profile":
+        result = {"profile": "Long horizon. " * 1000 + tail}
+    elif name == "portfolio_lookup":
+        result = {"holdings": [{"ticker": f"T{n}", "shares": n + 1, "cost_basis": 10} for n in range(400)], "bank": {"restriction": tail}}
+    elif name == "specialist_row":
+        result = {"Persona": "Michael Burry", "Philosophy": "Check constraints. " * 1000 + tail}
+    else:
+        monkeypatch.setenv("ANCHOR_API_KEY", "test")
+        source = {"title": "Report", "url": "https://issuer.test/report", "quote": tail}
+        result = {"results": [{**source, "quote": "Report details. " * 1000 + tail}]}
+
+    async def call(tool_name, args, brief, persona):
+        assert tool_name == name
+        return result
+
+    async def chat(messages, tools=None, max_tokens=4096):
+        replies = [m for m in messages if m["role"] == "tool"]
+        if not replies:
+            return FakeLLM._result({"role": "assistant", "tool_calls": [
+                {"id": "large", "type": "function", "function": {"name": name, "arguments": "{}"}},
+            ]})
+        assert json.loads(replies[0]["content"]) == result
+        return FakeLLM._result({"role": "assistant", "content": json.dumps({**VERDICT, "sources": [source]})})
+
+    async def emit(event, data):
+        pass
+
+    monkeypatch.setattr(tools, "call", call)
+    monkeypatch.setattr(llm, "chat", chat)
+    verdict = await agents.run(personas.load()["burry"], {"summary": "s"}, "q", False, "", prism.Trace("large", "burry", "q"), emit)
+    assert [s.model_dump() for s in verdict.sources] == [source]

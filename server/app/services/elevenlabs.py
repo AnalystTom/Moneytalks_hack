@@ -46,9 +46,9 @@ async def voice_for(client: httpx.AsyncClient, key: str, member: str) -> str:
         match = next((v for v in voices if any(n in v["name"].lower() for n in wanted)), None)
         if not match:
             fallback = persona.voice_fallback.lower() if persona else ""
-            match = next((v for v in voices if fallback and v["name"].lower().startswith(fallback)), None) or (voices[0] if voices else None)
+            match = next((v for v in voices if fallback and v["name"].lower().startswith(fallback)), None)
             if not match:
-                raise VoiceError("the ElevenLabs account has no voices", 503)
+                raise VoiceError(f"ElevenLabs voice unavailable for {member}: no persona or named fallback voice found", 503)
             log.warning("no ElevenLabs voice named for %s; using fallback voice %r", member, match["name"])
         else:
             log.info("%s speaks with ElevenLabs voice %r", member, match["name"])

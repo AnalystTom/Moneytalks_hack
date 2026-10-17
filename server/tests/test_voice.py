@@ -47,3 +47,21 @@ def test_speak_without_keys_is_503(client):
 def test_speak_upstream_error_is_502(client, eleven, monkeypatch):
     mock_elevenlabs(monkeypatch, lambda r: httpx.Response(401))
     assert client.post("/api/voice/speak", json={"member": "burry", "text": "hi"}).status_code == 502
+
+
+@pytest.mark.parametrize("voices", [[], [{"voice_id": "unrelated", "name": "Unrelated voice"}]])
+def test_unresolved_member_voice_is_unavailable_on_both_routes(client, monkeypatch, voices):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test")
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"voices": voices})
+
+    mock_elevenlabs(monkeypatch, handler)
+    params = {"member": "burry", "text": "hi"}
+    responses = [client.get("/api/voice/speak", params=params), client.post("/api/voice/speak", json=params)]
+    for response in responses:
+        assert response.status_code == 503
+        assert "voice unavailable for burry" in response.json()["detail"]
+    assert [request.method for request in requests] == ["GET"]

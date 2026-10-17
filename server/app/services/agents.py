@@ -94,10 +94,10 @@ async def _tool(call: dict, persona, brief: dict, trace: Trace, root, messages: 
         span.output = json.dumps(result)
         if "error" in result:
             span.error = str(result["error"])
-    content = json.dumps(result, ensure_ascii=False)[:12000]
+    content = json.dumps(result, ensure_ascii=False)
     if "error" not in result:
         if name == "web_search":
-            evidence.extend(Source(**r) for r in result.get("results", []) if json.dumps(r, ensure_ascii=False) in content)
+            evidence.extend(Source(**r) for r in result.get("results", []))
         else:
             evidence.append(Source(title=name, url="", quote=content))
     for r in result.get("results", []):
