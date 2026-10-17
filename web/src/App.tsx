@@ -456,17 +456,22 @@ export default function App() {
     void execute(false);
   }
   const hasResults = !!summary;
-  const selectedVerdict = selected
-    ? presented?.member === selected
-      ? presented
-      : verdicts[selected]
-    : undefined;
+  const boardVerdicts = { ...verdicts };
+  for (const item of conversation) {
+    if (item.verdict) boardVerdicts[item.member] = item.verdict;
+  }
+  if (presented) boardVerdicts[presented.member] = presented;
+  const boardChair = conversation.some(
+    (item) => item.member === "buffett" && item.verdict,
+  )
+    ? undefined
+    : chair;
+  const selectedVerdict = selected ? boardVerdicts[selected] : undefined;
   return (
     <div className="app">
       <header className="topbar">
         <a className="brand" href="/" aria-label="Council home">
-          <span className="brand-icon">♜</span> COUNCIL
-          <span className="brand-dot">.</span>
+          C<span className="brand-dot">O</span>UNCIL
         </a>
         <div className="brand-note">
           DIFFERENT PERSPECTIVES.
@@ -517,12 +522,9 @@ export default function App() {
               <Boardroom
                 active={active}
                 statuses={statuses}
-                verdicts={
-                  active && presented?.member === active
-                    ? { ...verdicts, [active]: presented }
-                    : verdicts
-                }
+                verdicts={boardVerdicts}
                 sources={sources}
+                chair={boardChair}
                 onSelect={setSelected}
               />
             </Suspense>
@@ -575,7 +577,7 @@ export default function App() {
               <p className="eyebrow">
                 {hasResults ? "THE CONVERSATION" : "BEFORE WE BEGIN"}
               </p>
-              <h2>{hasResults ? "Council notes" : "Your brief"}</h2>
+              <h2>{hasResults ? "Ask the council" : "Your brief"}</h2>
               <p className="muted">
                 {hasResults
                   ? "Every perspective, in one place."

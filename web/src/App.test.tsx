@@ -418,3 +418,69 @@ describe("spoken answers", () => {
     },
   );
 });
+
+it("keeps follow-up answers on every seat after later members speak", async () => {
+  vi.useFakeTimers();
+  function boardroom(node: ReactNode): Props | undefined {
+    for (const child of Children.toArray(node)) {
+      if (!isValidElement<Props>(child)) continue;
+      if (child.props.verdicts) return child.props;
+      const nested = boardroom(child.props.children);
+      if (nested) return nested;
+    }
+  }
+  function currentBoard() {
+    hooks.next = 0;
+    return boardroom(App())!;
+  }
+  vi.mocked(streamCouncil).mockImplementationOnce(
+    async (_, __, ___, receive) => {
+      await receive({ event: "run.started", data: { run_id: "parent" } });
+      await receive({
+        event: "chair.summary",
+        data: {
+          overall_signal: "HOLD",
+          summary: "Returned initial chair summary",
+          consensus: "Returned consensus",
+          dissent: [],
+        },
+      });
+      await receive({ event: "run.done", data: { run_id: "parent" } });
+    },
+  );
+  submit("brief-form");
+  await vi.advanceTimersByTimeAsync(1700);
+  expect(currentBoard().chair).toMatchObject({
+    summary: "Returned initial chair summary",
+  });
+  for (const member of ["buffett", "burry"] as const) {
+    get("id", "member").onChange!({ target: { value: member } });
+    get("id", "follow-question").onChange!({
+      target: { value: `Why, ${member}?` },
+    });
+    vi.mocked(streamCouncil).mockImplementationOnce(
+      async (_, __, ___, receive) => {
+        await receive({
+          event: "member.verdict",
+          data: {
+            member,
+            signal: "HOLD",
+            headline: `Returned ${member} follow-up`,
+            confidence: 0.8,
+            reasons: [],
+            sources: [],
+            tickers: [],
+          },
+        });
+        await receive({ event: "run.done", data: { run_id: "parent" } });
+      },
+    );
+    submit("follow-form");
+    await vi.advanceTimersByTimeAsync(1200);
+  }
+  expect(currentBoard().verdicts).toMatchObject({
+    buffett: { headline: "Returned buffett follow-up" },
+    burry: { headline: "Returned burry follow-up" },
+  });
+  expect(currentBoard().chair).toBeUndefined();
+});
