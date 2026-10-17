@@ -34,9 +34,10 @@ Answers are cached per input + question so the stage demo survives a bad network
 
 ## Screen
 
-- Left ~70%: three.js scene (react-three-fiber). First-person camera at the user's end of a boardroom table. Warren (orchestrator) sits at the far head; Leopold on the left; Cramer and Burry on the right. Members are stylised, comical generated portraits (2D billboards in the 3D scene). The speaking member is spotlit; their verdict card lands on the table in front of them with a "view more" control that expands reasons and sources.
+- Left ~70%: HTML/CSS boardroom with a curved table and separate generated cartoon portrait cutouts. Warren (orchestrator) sits at the head; Leopold on the left; Burry and Cramer on the right. All four speech bubbles stay in the layout, grow with their returned headlines (Warren’s returned summary for the final ruling), and are never line-clamped. The active member’s bubble is highlighted. BUY and SELL use thumbs-up/down icons, HOLD uses a pause icon, and pending members show an hourglass. "View more" expands the displayed answer; see the [web journey](../web/README.md#journey) for detail selection and follow-up behavior. No WebGL is required.
 - Right ~30%: React chat panel - the input step, ingest summary, chair summary, follow-ups.
-- Design direction: high-stakes financial council, boardroom drama.
+- Narrow screens: two columns of members, with Warren first, and the chat panel below the boardroom. The main content scrolls vertically for long answers while the parody notice remains visible in the footer.
+- Design direction: stone-grey / charcoal neutral palette and flat cut-paper cartoon members.
 
 ## Server-to-scene contract
 
@@ -69,7 +70,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 ## Stack
 
 - Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 planned for briefs, runs and cached events. See [deployment](../server/README.md#deploy-cloudflare) for current storage limits. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
-- Frontend: React (Vite + TypeScript) + react-three-fiber, served as the Worker's static assets.
+- Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Web search: Anchor.
 - Voice: ElevenLabs text-to-speech, one cloned voice per member (`ELEVENLABS_VOICE_<MEMBER>`).

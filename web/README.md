@@ -1,6 +1,6 @@
 # Council web
 
-React + Vite + TypeScript. The boardroom follows the selected stone-grey / charcoal cartoon mockup: Warren at the head, Leopold left, Burry and Cramer right, a curved table and the chat panel on the right. Palette and typography are CSS variables in `src/style.css`. The flat scene uses HTML and CSS so speech stays readable without WebGL.
+React + Vite + TypeScript. See the [screen design](../data/spec.md#screen) for the boardroom layout and visual direction. Palette and typography are CSS variables in `src/style.css`.
 
 ## Run
 
@@ -24,7 +24,9 @@ Open the Vite URL (normally `http://127.0.0.1:5173`). `/api` proxies to FastAPI 
 
 ## Journey
 
-Upload CSV/JSON holdings (`ticker`, `shares`, `cost_basis` per share), optionally request the Plaid sandbox, and upload or write a persona profile. Holdings JSON can be an array or an object with a `holdings` array; broker JSON with a `positions` array is also accepted and normalized before submission. Ask a question and convene the council. The UI consumes POST SSE, reveals each verdict, stages a drum roll, shows Warren's ruling, and supports named-member follow-ups and roast mode. A failed or cancelled follow-up preserves the completed council session so you can ask again. Select a seat or a member in the strip for expanded verdicts. All four speech bubbles stay in the page layout and grow with their returned text; they are never line-clamped. BUY and SELL use thumbs-up/down icons, HOLD uses a pause icon, and pending members show an hourglass. The chair’s returned summary appears in Warren’s bubble. The page can scroll vertically for long answers. Narrow screens use two columns, with Warren first. No WebGL is required for the scene or transcript.
+Upload CSV/JSON holdings (`ticker`, `shares`, `cost_basis` per share), optionally request the Plaid sandbox, and upload or write a persona profile. Holdings JSON can be an array or an object with a `holdings` array; broker JSON with a `positions` array is also accepted and normalized before submission. Ask a question and convene the council. The UI consumes POST SSE, reveals each verdict, stages a drum roll, shows Warren's ruling, and supports named-member follow-ups and roast mode. A failed or cancelled follow-up preserves the completed council session so you can ask again.
+
+Select a speech bubble, portrait, seat label or member in the strip to expand the displayed answer. While Warren’s bubble shows his final ruling, its details show the ruling’s overall signal, summary, consensus and dissent. Each member’s latest follow-up replaces their displayed answer and strip signal; a follow-up from Warren replaces his ruling on the board. The transcript retains the original verdicts, ruling and follow-ups.
 
 Voice plays sequentially when `/api/voice/speak` is configured. Each clip can finish naturally; 30 seconds without playback progress reports a timeout and advances the stream. Playback errors are explicit. Pausing a clip or disabling sound releases the stream to continue; cancelling the session stops playback and the request.
 
