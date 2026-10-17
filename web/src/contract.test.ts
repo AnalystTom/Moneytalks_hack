@@ -4,6 +4,8 @@ import {
   portfolioFile,
   sourceUrl,
   streamCouncil,
+  toChair,
+  toVerdict,
 } from "./contract";
 import { readFileSync } from "node:fs";
 
@@ -112,5 +114,41 @@ describe("POST SSE", () => {
     } finally {
       globalThis.fetch = prior;
     }
+  });
+});
+
+describe("council event mapping", () => {
+  const call = (ticker: string, signal: "BUY" | "HOLD" | "SELL") => ({
+    ticker,
+    signal,
+    conviction: "high" as const,
+    rationale: "",
+  });
+  it("takes the majority call, ties going to the top-weighted name", () => {
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "HOLD"), call("C", "HOLD")],
+      }).signal,
+    ).toBe("HOLD");
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "BUY")],
+      }).signal,
+    ).toBe("SELL");
+    expect(toVerdict({ member: "burry" }).signal).toBe("HOLD");
+  });
+  it("derives the ruling signal from the per-name rulings", () => {
+    const name = (signal: "BUY" | "HOLD" | "SELL") => ({
+      ticker: "X",
+      signal,
+      conviction: "low" as const,
+      consensus: "",
+    });
+    expect(
+      toChair({ positions: [name("BUY"), name("BUY"), name("SELL")] })
+        .overall_signal,
+    ).toBe("BUY");
   });
 });

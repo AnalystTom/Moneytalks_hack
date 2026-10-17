@@ -81,6 +81,16 @@ function VerdictCard({
             <li key={i}>{reason}</li>
           ))}
         </ul>
+        {verdict.advice.length > 0 && (
+          <>
+            <h4>What to do</h4>
+            <ul>
+              {verdict.advice.map((item, i) => (
+                <li key={i}>{item.action}</li>
+              ))}
+            </ul>
+          </>
+        )}
         <h4>Sources</h4>
         <Sources sources={verdict.sources} />
       </details>
