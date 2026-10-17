@@ -1,8 +1,8 @@
 :root {
   --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
   --serif: Georgia, "Times New Roman", serif;
-  --speech-size: clamp(14px, 1.25vw, 20px);
-  --wordmark-size: clamp(38px, 5.8vw, 84px);
+  --speech-size: clamp(13px, 1.05vw, 18px);
+  --wordmark-size: clamp(38px, min(5.8vw, 7.5vh), 84px);
   --background: #f3f1eb;
   --panel: #f8f6f1;
   --panel-highlight: #e9e5de;
@@ -111,7 +111,7 @@ h3 {
   flex-direction: column;
 }
 .topbar {
-  min-height: 112px;
+  min-height: clamp(72px, 11vh, 112px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -200,6 +200,7 @@ h3 {
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 7fr) minmax(355px, 3fr);
+  grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -212,7 +213,7 @@ h3 {
   flex-direction: column;
 }
 .scene-heading {
-  padding: 22px 30px 8px;
+  padding: clamp(10px, 2vh, 22px) 30px 4px;
 }
 .eyebrow {
   color: var(--accent);
@@ -233,19 +234,24 @@ h3 {
 }
 .scene {
   flex: 1;
+  min-height: 0;
   min-width: 0;
 }
 .boardroom {
   position: relative;
-  min-height: 540px;
+  min-height: 430px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   isolation: isolate;
 }
 .council-seats {
   display: grid;
-  grid-template-columns: 1fr 1.1fr 1fr 1fr;
+  grid-template-columns: 1fr 1.1fr 1fr 1fr 1fr;
   align-items: start;
+  flex: 1;
   gap: clamp(10px, 1.2vw, 22px);
-  padding: 0 24px 150px;
+  padding: 0 24px 12px;
 }
 .council-seat {
   min-width: 0;
@@ -254,13 +260,16 @@ h3 {
   align-items: stretch;
 }
 .council-seat.leopold {
-  padding-top: 65px;
+  padding-top: 4vh;
+}
+.council-seat.dalio {
+  padding-top: 7vh;
 }
 .council-seat.burry {
-  padding-top: 36px;
+  padding-top: 1vh;
 }
 .council-seat.cramer {
-  padding-top: 145px;
+  padding-top: 9vh;
 }
 .speech-bubble {
   position: relative;
@@ -271,7 +280,7 @@ h3 {
   width: 100%;
   min-width: 0;
   padding: clamp(10px, 1vw, 18px);
-  margin-bottom: 30px;
+  margin-bottom: 22px;
   border: 3px solid var(--ink);
   border-radius: 22px;
   background: var(--paper);
@@ -313,6 +322,43 @@ h3 {
   line-height: 1.3;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.ruling-banner {
+  position: relative;
+  z-index: 3;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(760px, 92%);
+  margin: 0 auto 14px;
+  padding: 10px 16px;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  background: var(--paper);
+  text-align: left;
+}
+.ruling-banner .bubble-copy strong {
+  font-size: 13px;
+  -webkit-line-clamp: 2;
+}
+.ruling-banner .bubble-more {
+  margin: 0;
+  white-space: nowrap;
+}
+.ruling-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ruling-chips .signal {
+  padding: 3px 7px;
+  font-size: 9px;
 }
 .bubble-more {
   display: block;
@@ -341,7 +387,7 @@ h3 {
 .member-portrait img {
   display: block;
   width: 100%;
-  height: clamp(170px, 21vw, 310px);
+  height: clamp(110px, 19vh, 310px);
   object-fit: contain;
   object-position: bottom;
 }
@@ -407,7 +453,7 @@ h3 {
 }
 .member-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
   border-top: 1px solid var(--line);
   background: var(--panel);
@@ -463,6 +509,9 @@ h3 {
 }
 .portrait-mini.burry {
   background-image: url("/portraits/burry.png");
+}
+.portrait-mini.dalio {
+  background-image: url("/portraits/dalio.svg");
 }
 .panel {
   min-height: 0;
@@ -1018,9 +1067,13 @@ footer p {
     padding: 12px 20px 70px;
   }
   .council-seat.leopold,
+  .council-seat.dalio,
   .council-seat.burry,
   .council-seat.cramer {
     padding-top: 0;
+  }
+  .ruling-banner {
+    width: calc(100% - 40px);
   }
   .council-seat.buffett {
     grid-column: 1;
@@ -1076,5 +1129,76 @@ footer p {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+.calls {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+.calls li {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.calls .signal {
+  justify-self: start;
+}
+.routed {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+.chat-message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.chat-message p {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+.chat-avatar {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--chair);
+  object-fit: cover;
+  object-position: top;
+}
+.chat-avatar.chair {
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chips button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  font-size: 11px;
+}
+.chat-message strong {
+  font-size: 12px;
+}
+@media (min-width: 851px) and (max-height: 960px) {
+  .member-strip {
+    display: none;
+  }
+  .scene-heading h1 {
+    font-size: clamp(28px, 5vh, 54px);
+    margin-bottom: 4px;
+  }
+  .member-portrait img {
+    height: 17vh;
   }
 }

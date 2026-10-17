@@ -8,7 +8,14 @@ import {
   sourceUrl,
   streamCouncil,
 } from "./contract";
-import type { Chair, CouncilEvent, Member, Source, Verdict } from "./contract";
+import type {
+  Chair,
+  CouncilEvent,
+  Member,
+  Source,
+  Speaker,
+  Verdict,
+} from "./contract";
 const Boardroom = lazy(() => import("./Boardroom"));
 const memberIds = Object.keys(members) as Member[];
 const pause = (ms: number) =>
@@ -48,13 +55,27 @@ function VerdictCard({
       </div>
       <h3>{verdict.headline}</h3>
       <p className="muted">
-        {Math.round(verdict.confidence * 100)}% confidence
+        {Math.round(verdict.confidence * 100)}% avg. conviction
         {verdict.tickers.length ? ` · ${verdict.tickers.join(", ")}` : ""}
       </p>
       <details open={open || undefined}>
         <summary>
           View more <span>↗</span>
         </summary>
+        {verdict.analysis && <p>{verdict.analysis}</p>}
+        {verdict.positions.length > 0 && (
+          <ul className="calls">
+            {verdict.positions.map((call) => (
+              <li key={call.ticker}>
+                <b className={`signal ${call.signal.toLowerCase()}`}>
+                  {call.ticker} {call.signal}
+                </b>
+                <small>{call.conviction} conviction</small>
+                <span>{call.rationale}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <ul className="reasons">
           {verdict.reasons.map((reason, i) => (
             <li key={i}>{reason}</li>
@@ -67,30 +88,97 @@ function VerdictCard({
   );
 }
 
-function ChairRuling({ chair }: { chair: Chair }) {
+function ChairRuling({
+  chair,
+  open = false,
+}: {
+  chair: Chair;
+  open?: boolean;
+}) {
   return (
     <article className="ruling">
-      <p className="eyebrow">THE CHAIR’S FINAL WORD</p>
+      <p className="eyebrow">THE CHAIR</p>
       <div className="card-top">
-        <h2>Warren’s ruling</h2>
+        <h2>Council ruling</h2>
         <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
           {chair.overall_signal}
         </span>
       </div>
       <p>{chair.summary}</p>
-      <h4>Consensus</h4>
-      <p>{chair.consensus}</p>
-      <h4>Dissent</h4>
-      {chair.dissent.length ? (
-        <ul>
-          {chair.dissent.map((item, i) => (
-            <li key={i}>{item}</li>
-          ))}
-        </ul>
-      ) : (
-        <p>No dissent returned.</p>
-      )}
+      <div className="ruling-chips">
+        {chair.positions.map((name) => (
+          <b
+            key={name.ticker}
+            className={`signal ${name.signal.toLowerCase()}`}
+            title={name.consensus}
+          >
+            {name.ticker} {name.signal} · {name.conviction}
+          </b>
+        ))}
+      </div>
+      <details open={open || undefined}>
+        <summary>
+          View more <span>↗</span>
+        </summary>
+        <h4>Consensus</h4>
+        <p>{chair.consensus}</p>
+        <h4>Dissent</h4>
+        {chair.dissent.length ? (
+          <ul>
+            {chair.dissent.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>No dissent returned.</p>
+        )}
+        {chair.actions.length > 0 && (
+          <>
+            <h4>Actions</h4>
+            <ul>
+              {chair.actions.map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </details>
     </article>
+  );
+}
+
+type ChatItem =
+  | { kind: "user"; text: string }
+  | { kind: "routed"; members: Speaker[]; reason: string }
+  | { kind: "reply"; member: Speaker; text: string };
+const speakerName = (speaker: Speaker) =>
+  speaker === "chair" ? "The chair" : members[speaker].name;
+const firstName = (speaker: Speaker) => speakerName(speaker).split(" ").pop();
+
+function ChatMessage({ item }: { item: ChatItem }) {
+  if (item.kind === "user") return <p className="user-question">{item.text}</p>;
+  if (item.kind === "routed")
+    return (
+      <p className="routed">
+        Asking {item.members.map(firstName).join(" and ")} · {item.reason}
+      </p>
+    );
+  return (
+    <div className="chat-message">
+      {item.member === "chair" ? (
+        <span className="chat-avatar chair">C</span>
+      ) : (
+        <img
+          className="chat-avatar"
+          src={members[item.member].portrait}
+          alt=""
+        />
+      )}
+      <div>
+        <strong>{speakerName(item.member)}</strong>
+        <p>{item.text}</p>
+      </div>
+    </div>
   );
 }
 
@@ -144,20 +232,20 @@ export default function App() {
   const [summary, setSummary] = useState("");
   const [runId, setRunId] = useState("");
   const [active, setActive] = useState<Member>();
-  const [selected, setSelected] = useState<Member>();
+  const [selected, setSelected] = useState<Member | "chair">();
   const [presented, setPresented] = useState<Verdict>();
-  const [statuses, setStatuses] = useState<Partial<Record<Member, string>>>({});
+  const [statuses, setStatuses] = useState<Partial<Record<Speaker, string>>>(
+    {},
+  );
   const [sources, setSources] = useState<Partial<Record<Member, Source[]>>>({});
   const [verdicts, setVerdicts] = useState<Partial<Record<Member, Verdict>>>(
     {},
   );
   const [chair, setChair] = useState<Chair>();
   const [drumming, setDrumming] = useState(false);
-  const [followMember, setFollowMember] = useState<Member>("buffett");
   const [followQuestion, setFollowQuestion] = useState("");
-  const [conversation, setConversation] = useState<
-    { question: string; member: Member; verdict?: Verdict }[]
-  >([]);
+  const [conversation, setConversation] = useState<ChatItem[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [audioMessage, setAudioMessage] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const controller = useRef<AbortController | null>(null);
@@ -198,8 +286,8 @@ export default function App() {
   }
   async function drumRoll() {
     setDrumming(true);
-    setActive("buffett");
-    setStage("The council has spoken. Warren has the floor.");
+    setActive(undefined);
+    setStage("The council has spoken. The chair has the floor.");
     const context = audioContext.current;
     if (soundEnabled.current && context?.state === "running") {
       for (let i = 0; i < 23; i++) {
@@ -306,7 +394,8 @@ export default function App() {
         }));
         if (event.data.status === "researching")
           setStage("The council is doing its homework.");
-        if (event.data.status === "speaking") setActive(event.data.member);
+        if (event.data.status === "speaking" && event.data.member !== "chair")
+          setActive(event.data.member);
         break;
       case "member.source":
         setSources((previous) => ({
@@ -321,27 +410,39 @@ export default function App() {
         setPresented(event.data);
         setActive(event.data.member);
         setStage(`${members[event.data.member].name} has a verdict.`);
-        if (follow)
-          setConversation((previous) =>
-            previous.map((item, i) =>
-              i === previous.length - 1
-                ? { ...item, verdict: event.data }
-                : item,
-            ),
-          );
-        else
-          setVerdicts((previous) => ({
-            ...previous,
-            [event.data.member]: event.data,
-          }));
+        setVerdicts((previous) => ({
+          ...previous,
+          [event.data.member]: event.data,
+        }));
         await pause(1200);
         break;
       case "chair.summary":
         await drumRoll();
         if (!signal.aborted) {
           setChair(event.data);
-          setStage("Warren’s ruling is in.");
+          setSuggestions(event.data.suggestions);
+          setStage("The council ruling is in.");
         }
+        break;
+      case "chat.routed":
+        setConversation((previous) => [
+          ...previous,
+          { kind: "routed", ...event.data },
+        ]);
+        break;
+      case "member.reply":
+        setConversation((previous) => [
+          ...previous,
+          { kind: "reply", member: event.data.member, text: event.data.text },
+        ]);
+        break;
+      case "chat.closed":
+        if (event.data.text)
+          setConversation((previous) => [
+            ...previous,
+            { kind: "reply", member: "chair", text: event.data.text },
+          ]);
+        setSuggestions(event.data.suggestions);
         break;
       case "member.audio":
         await playAudio(event.data.audio_url, signal);
@@ -386,7 +487,7 @@ export default function App() {
       setLoadingDemo(false);
     }
   }
-  async function execute(follow: boolean) {
+  async function execute(follow: boolean, text = followQuestion) {
     const abort = new AbortController();
     controller.current = abort;
     const timedOut = () => abort.abort("The council timed out. Please retry.");
@@ -406,19 +507,11 @@ export default function App() {
     unlockSound();
     try {
       if (follow) {
-        setConversation((previous) => [
-          ...previous,
-          { question: followQuestion, member: followMember },
-        ]);
-        setSources((previous) => ({ ...previous, [followMember]: [] }));
+        setConversation((previous) => [...previous, { kind: "user", text }]);
+        setSuggestions([]);
         await streamCouncil(
-          "/api/council/ask",
-          {
-            run_id: runId,
-            member: followMember,
-            question: followQuestion,
-            roast,
-          },
+          "/api/council/chat",
+          { run_id: runId, text, roast },
           abort.signal,
           receiveEvent,
         );
@@ -484,16 +577,10 @@ export default function App() {
   }
   const hasResults = !!summary;
   const boardVerdicts = { ...verdicts };
-  for (const item of conversation) {
-    if (item.verdict) boardVerdicts[item.member] = item.verdict;
-  }
   if (presented) boardVerdicts[presented.member] = presented;
-  const boardChair = conversation.some(
-    (item) => item.member === "buffett" && item.verdict,
-  )
-    ? undefined
-    : chair;
-  const selectedVerdict = selected ? boardVerdicts[selected] : undefined;
+  const boardChair = chair;
+  const selectedVerdict =
+    selected && selected !== "chair" ? boardVerdicts[selected] : undefined;
   return (
     <div className="app">
       <header className="topbar">
@@ -530,7 +617,7 @@ export default function App() {
           aria-label="Council boardroom"
         >
           <div className="scene-heading">
-            <p className="eyebrow">YOUR PORTFOLIO. FOUR PERSPECTIVES.</p>
+            <p className="eyebrow">YOUR PORTFOLIO. FIVE PERSPECTIVES.</p>
             <h1>
               {drumming
                 ? "One final word."
@@ -559,7 +646,7 @@ export default function App() {
           {drumming && (
             <div className="drum-overlay" role="status">
               <span>● ● ●</span>
-              <h2>Warren’s ruling</h2>
+              <h2>Council ruling</h2>
               <p>The chair has the floor.</p>
             </div>
           )}
@@ -577,10 +664,7 @@ export default function App() {
           </div>
           <div className="member-strip">
             {memberIds.map((member) => {
-              const signal =
-                member === "buffett" && boardChair
-                  ? boardChair.overall_signal
-                  : boardVerdicts[member]?.signal;
+              const signal = boardVerdicts[member]?.signal;
               return (
                 <button
                   key={member}
@@ -746,7 +830,7 @@ export default function App() {
                 >
                   {busy ? "Convening…" : "Convene the council"} <span>→</span>
                 </button>
-                <p className="form-footnote">Four opinions. Your decision.</p>
+                <p className="form-footnote">Five opinions. Your decision.</p>
               </form>
             )}
             {hasResults && (
@@ -777,22 +861,7 @@ export default function App() {
                 ))}
                 {chair && <ChairRuling chair={chair} />}
                 {conversation.map((item, i) => (
-                  <div key={i} className="follow-entry">
-                    <p className="user-question">
-                      To {members[item.member].name}
-                      <br />
-                      <strong>{item.question}</strong>
-                    </p>
-                    {item.verdict ? (
-                      <VerdictCard verdict={item.verdict} />
-                    ) : (
-                      <p className="muted">
-                        {busy
-                          ? "Waiting for an answer…"
-                          : "No answer returned."}
-                      </p>
-                    )}
-                  </div>
+                  <ChatMessage key={i} item={item} />
                 ))}
                 <div ref={transcriptEnd} />
               </div>
@@ -835,25 +904,23 @@ export default function App() {
                 }}
               >
                 <p className="eyebrow">THE FLOOR IS YOURS</p>
-                <h3>Ask a follow-up</h3>
-                <label className="field-label" htmlFor="member">
-                  Council member
-                </label>
-                <select
-                  id="member"
-                  value={followMember}
-                  onChange={(event) =>
-                    setFollowMember(event.target.value as Member)
-                  }
-                >
-                  {memberIds.map((member) => (
-                    <option key={member} value={member}>
-                      {members[member].name}
-                    </option>
-                  ))}
-                </select>
+                <h3>Chat with the council</h3>
+                {suggestions.length > 0 && (
+                  <div className="chips">
+                    {suggestions.map((chip) => (
+                      <button
+                        type="button"
+                        key={chip}
+                        disabled={!runFinished}
+                        onClick={() => void execute(true, chip)}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <label className="field-label" htmlFor="follow-question">
-                  Your question
+                  Your message
                 </label>
                 <textarea
                   id="follow-question"
@@ -861,17 +928,17 @@ export default function App() {
                   onChange={(event) => setFollowQuestion(event.target.value)}
                   required
                   rows={2}
-                  placeholder="Go a little deeper…"
+                  placeholder="Ask anything · @burry to address a member"
                 />
                 <button
                   className="primary"
                   disabled={!runId || !followQuestion.trim() || !runFinished}
                 >
-                  Ask {members[followMember].name.split(" ")[0]} <span>→</span>
+                  Send <span>→</span>
                 </button>
                 {!runFinished && (
                   <p className="muted">
-                    Complete a new council session before asking a follow-up.
+                    Complete a new council session before chatting.
                   </p>
                 )}
                 <button
@@ -887,6 +954,7 @@ export default function App() {
                     setSources({});
                     setStatuses({});
                     setConversation([]);
+                    setSuggestions([]);
                     setSelected(undefined);
                     setError("");
                     setAudioUrl("");
@@ -910,11 +978,15 @@ export default function App() {
       </footer>
       {selected && (
         <MemberDialog onClose={() => setSelected(undefined)}>
-          <p className="eyebrow">{members[selected].role}</p>
-          <h2>{members[selected].name}</h2>
-          {selected === "buffett" && boardChair ? (
-            <ChairRuling chair={boardChair} />
-          ) : selectedVerdict ? (
+          <p className="eyebrow">
+            {selected === "chair" ? "The chair" : members[selected].role}
+          </p>
+          <h2>
+            {selected === "chair" ? "Council ruling" : members[selected].name}
+          </h2>
+          {selected === "chair" && boardChair ? (
+            <ChairRuling chair={boardChair} open />
+          ) : selected === "chair" ? null : selectedVerdict ? (
             <VerdictCard verdict={selectedVerdict} open />
           ) : (
             <>

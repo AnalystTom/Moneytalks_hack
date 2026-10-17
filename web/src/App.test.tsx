@@ -131,8 +131,8 @@ it.each(["request failure", "cancellation", "stream error", "early end"])(
     submit("follow-form");
     await idle();
     expect(streamCouncil).toHaveBeenLastCalledWith(
-      "/api/council/ask",
-      expect.objectContaining({ run_id: "parent", question: "Why hold?" }),
+      "/api/council/chat",
+      expect.objectContaining({ run_id: "parent", text: "Why hold?" }),
       expect.any(AbortSignal),
       expect.any(Function),
     );
@@ -421,8 +421,60 @@ describe("spoken answers", () => {
   );
 });
 
-it("opens the displayed ruling or member answer, including after follow-ups", async () => {
+it("shows the chair ruling and renders chat turns from the council", async () => {
   vi.useFakeTimers();
+  const call = (ticker: string, signal: Verdict["signal"]) => ({
+    ticker,
+    signal,
+    conviction: "high" as const,
+    rationale: `Returned ${ticker} rationale`,
+  });
+  vi.mocked(streamCouncil).mockImplementationOnce(
+    async (_, __, ___, receive) => {
+      await receive({ event: "run.started", data: { run_id: "parent" } });
+      for (const member of Object.keys(members) as Member[]) {
+        await receive({
+          event: "member.verdict",
+          data: {
+            member,
+            signal: "SELL",
+            headline: `Returned ${member} individual verdict`,
+            confidence: 0.9,
+            reasons: ["Returned individual reason"],
+            sources: [],
+            tickers: ["NVDA"],
+            analysis: "",
+            advice: [],
+            positions: [call("NVDA", "SELL")],
+          },
+        });
+      }
+      await receive({
+        event: "chair.summary",
+        data: {
+          overall_signal: "SELL",
+          summary: "Returned initial chair summary",
+          consensus: "Returned consensus",
+          dissent: ["Returned dissent"],
+          actions: ["Returned action"],
+          suggestions: ["Returned chip"],
+          positions: [
+            {
+              ticker: "NVDA",
+              signal: "SELL",
+              conviction: "high",
+              consensus: "Returned name consensus",
+            },
+          ],
+        },
+      });
+      await receive({ event: "run.done", data: { run_id: "parent" } });
+    },
+  );
+  submit("brief-form");
+  await vi.advanceTimersByTimeAsync(9000);
+  hooks.next = 0;
+  const app = App();
   function boardroom(node: ReactNode): Props | undefined {
     for (const child of Children.toArray(node)) {
       if (!isValidElement<Props>(child)) continue;
@@ -431,140 +483,62 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
       if (nested) return nested;
     }
   }
-  function currentBoard() {
-    hooks.next = 0;
-    return boardroom(App())!;
-  }
-  function details(member: Member, signal: Verdict["signal"]) {
-    const button = Children.toArray(
-      get("className", "member-strip").children,
-    ).find(
-      (child) =>
-        isValidElement<Props>(child) &&
-        renderToStaticMarkup(child).includes(members[member].name),
-    );
-    if (!isValidElement<Props>(button))
-      throw new Error(`Missing strip button for ${member}`);
-    expect(renderToStaticMarkup(button)).toContain(
-      `<b class="signal ${signal.toLowerCase()}">${signal}</b>`,
-    );
-    button.props.onClick!();
-    hooks.next = 0;
-    const html = renderToStaticMarkup(App());
-    expect(html).toContain("<dialog");
-    const dialog = html.slice(
-      html.indexOf("<dialog"),
-      html.indexOf("</dialog>"),
-    );
-    expect(dialog).toContain(
-      `<span class="signal ${signal.toLowerCase()}">${signal}</span>`,
-    );
-    return dialog;
-  }
+  const board = boardroom(app) as unknown as {
+    chair: unknown;
+    verdicts: Record<string, unknown>;
+    onSelect: (member: string) => void;
+  };
+  expect(board.chair).toMatchObject({
+    summary: "Returned initial chair summary",
+  });
+  expect(board.verdicts.dalio).toMatchObject({ signal: "SELL" });
+  board.onSelect("chair");
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  const dialog = html.slice(html.indexOf("<dialog"), html.indexOf("</dialog>"));
+  for (const text of [
+    "Council ruling",
+    "Returned initial chair summary",
+    "NVDA SELL",
+    "Returned consensus",
+    "Returned dissent",
+    "Returned action",
+  ])
+    expect(dialog).toContain(text);
+  expect(html).toContain("Returned chip");
+
+  get("id", "follow-question").onChange!({ target: { value: "@burry NVDA?" } });
   vi.mocked(streamCouncil).mockImplementationOnce(
     async (_, __, ___, receive) => {
-      await receive({ event: "run.started", data: { run_id: "parent" } });
-      for (const member of ["buffett", "leopold", "burry", "cramer"] as const) {
-        await receive({
-          event: "member.verdict",
-          data: {
-            member,
-            signal: "BUY",
-            headline: `Returned ${member} individual verdict`,
-            confidence: 0.8,
-            reasons: ["Returned individual reason"],
-            sources: [],
-            tickers: [],
-          },
-        });
-      }
       await receive({
-        event: "chair.summary",
-        data: {
-          overall_signal: "HOLD",
-          summary: "Returned initial chair summary",
-          consensus: "Returned consensus",
-          dissent: ["Returned dissent"],
-        },
+        event: "chat.routed",
+        data: { members: ["burry"], reason: "named in the question" },
+      });
+      await receive({
+        event: "member.reply",
+        data: { member: "burry", text: "Returned burry reply" },
+      });
+      await receive({
+        event: "chat.closed",
+        data: { text: "", suggestions: ["Returned next chip"] },
       });
       await receive({ event: "run.done", data: { run_id: "parent" } });
     },
   );
-  submit("brief-form");
-  await vi.advanceTimersByTimeAsync(4800);
-  expect(details("buffett", "BUY")).toContain(
-    "Returned buffett individual verdict",
+  submit("follow-form");
+  await vi.advanceTimersByTimeAsync(1200);
+  expect(streamCouncil).toHaveBeenLastCalledWith(
+    "/api/council/chat",
+    { run_id: "parent", text: "@burry NVDA?", roast: false },
+    expect.any(AbortSignal),
+    expect.any(Function),
   );
-  await vi.advanceTimersByTimeAsync(1700);
-  expect(currentBoard().chair).toMatchObject({
-    summary: "Returned initial chair summary",
-  });
-  const ruling = details("buffett", "HOLD");
+  hooks.next = 0;
+  const chat = renderToStaticMarkup(App());
   for (const text of [
-    "HOLD",
-    "Returned initial chair summary",
-    "Returned consensus",
-    "Returned dissent",
+    "Asking Burry",
+    "Returned burry reply",
+    "Returned next chip",
   ])
-    expect(ruling).toContain(text);
-  expect(ruling).not.toContain("BUY");
-  expect(ruling).not.toContain("individual verdict");
-  for (const member of ["leopold", "burry", "cramer"] as const) {
-    const individual = details(member, "BUY");
-    expect(individual).toContain("BUY");
-    expect(individual).toContain(`Returned ${member} individual verdict`);
-    expect(individual).toContain("Returned individual reason");
-    expect(individual).not.toContain("Returned initial chair summary");
-  }
-  for (const [member, signal] of [
-    ["buffett", "SELL"],
-    ["burry", "HOLD"],
-    ["buffett", "HOLD"],
-    ["burry", "SELL"],
-  ] as const) {
-    get("id", "member").onChange!({ target: { value: member } });
-    get("id", "follow-question").onChange!({
-      target: { value: `Why, ${member}?` },
-    });
-    vi.mocked(streamCouncil).mockImplementationOnce(
-      async (_, __, ___, receive) => {
-        await receive({
-          event: "member.verdict",
-          data: {
-            member,
-            signal,
-            headline: `Returned ${member} follow-up`,
-            confidence: 0.8,
-            reasons: [],
-            sources: [],
-            tickers: [],
-          },
-        });
-        await receive({ event: "run.done", data: { run_id: "parent" } });
-      },
-    );
-    submit("follow-form");
-    await vi.advanceTimersByTimeAsync(1200);
-    expect(details(member, signal)).toContain(`Returned ${member} follow-up`);
-  }
-  expect(currentBoard().verdicts).toMatchObject({
-    buffett: { headline: "Returned buffett follow-up", signal: "HOLD" },
-    burry: { headline: "Returned burry follow-up", signal: "SELL" },
-  });
-  expect(currentBoard().chair).toBeUndefined();
-  for (const [member, signal] of [
-    ["buffett", "HOLD"],
-    ["burry", "SELL"],
-  ] as const) {
-    const followUp = details(member, signal);
-    expect(followUp).toContain(`Returned ${member} follow-up`);
-    expect(followUp).not.toContain("Returned initial chair summary");
-    expect(followUp).not.toContain("individual verdict");
-  }
-  const transcript = renderToStaticMarkup(
-    get("className", "transcript").children,
-  );
-  for (const member of Object.keys(members))
-    expect(transcript).toContain(`Returned ${member} individual verdict`);
-  expect(transcript).toContain("Returned initial chair summary");
+    expect(chat).toContain(text);
 });

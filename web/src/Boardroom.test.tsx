@@ -33,10 +33,13 @@ const verdict = (
   reasons: [],
   sources: [],
   tickers: [],
+  analysis: "",
+  positions: [],
+  advice: [],
 });
 
 describe("cartoon boardroom", () => {
-  it("renders all four empty seats with pending icons and the generated assets", () => {
+  it("renders all five empty seats with pending icons and the generated assets", () => {
     const html = renderToStaticMarkup(
       <Boardroom
         statuses={{}}
@@ -45,24 +48,27 @@ describe("cartoon boardroom", () => {
         onSelect={() => {}}
       />,
     );
-    expect(html.match(/class="speech-bubble"/g)).toHaveLength(4);
-    expect(html.match(/aria-label="Pending"/g)).toHaveLength(4);
-    expect(html.match(/No verdict yet\./g)).toHaveLength(8);
+    expect(html.match(/class="speech-bubble"/g)).toHaveLength(5);
+    expect(html.match(/aria-label="Pending"/g)).toHaveLength(5);
+    expect(html.match(/No verdict yet\./g)).toHaveLength(10);
     for (const member of Object.keys(members)) {
-      expect(html).toContain(`/portraits/${member}.png`);
-      const asset = new URL(
-        `../public/portraits/${member}.png`,
-        import.meta.url,
-      );
+      const portrait = members[member as Member].portrait;
+      expect(html).toContain(portrait);
+      const asset = new URL(`../public${portrait}`, import.meta.url);
       expect(existsSync(asset)).toBe(true);
-      const png = readFileSync(asset);
-      expect(png.subarray(1, 4).toString()).toBe("PNG");
-      expect(png[25]).toBe(6);
+      if (portrait.endsWith(".png")) {
+        const png = readFileSync(asset);
+        expect(png.subarray(1, 4).toString()).toBe("PNG");
+        expect(png[25]).toBe(6);
+      }
     }
     expect(html.indexOf("council-seat leopold")).toBeLessThan(
       html.indexOf("council-seat buffett"),
     );
     expect(html.indexOf("council-seat buffett")).toBeLessThan(
+      html.indexOf("council-seat dalio"),
+    );
+    expect(html.indexOf("council-seat dalio")).toBeLessThan(
       html.indexOf("council-seat burry"),
     );
   });
@@ -79,12 +85,13 @@ describe("cartoon boardroom", () => {
       verdicts: {
         buffett: verdict("buffett", "HOLD", longLine),
         leopold: verdict("leopold", "BUY", longLine),
+        dalio: verdict("dalio", "BUY", longLine),
         burry: verdict("burry", "SELL", longLine),
         cramer: verdict("cramer", "HOLD", longLine),
       },
     });
     const html = renderToStaticMarkup(tree);
-    expect(html.split(`<strong>${longLine}</strong>`)).toHaveLength(5);
+    expect(html.split(`<strong>${longLine}</strong>`)).toHaveLength(6);
     for (const signal of ["BUY", "HOLD", "SELL"])
       expect(html).toContain(`aria-label="${signal}"`);
     const bubbles = buttons(tree).filter(
@@ -94,12 +101,13 @@ describe("cartoon boardroom", () => {
     expect(onSelect.mock.calls.flat()).toEqual([
       "leopold",
       "buffett",
+      "dalio",
       "burry",
       "cramer",
     ]);
   });
 
-  it("renders returned status, valid source counts, and Warren’s final summary", () => {
+  it("renders returned status, valid source counts, and the council ruling", () => {
     const html = renderToStaticMarkup(
       <Boardroom
         statuses={{ leopold: "researching" }}
@@ -115,6 +123,16 @@ describe("cartoon boardroom", () => {
           summary: "Returned final summary",
           consensus: "Returned consensus",
           dissent: [],
+          actions: [],
+          suggestions: [],
+          positions: [
+            {
+              ticker: "NVDA",
+              signal: "SELL",
+              conviction: "high",
+              consensus: "Returned name consensus",
+            },
+          ],
         }}
         onSelect={() => {}}
       />,
@@ -122,7 +140,8 @@ describe("cartoon boardroom", () => {
     expect(html).toContain("researching");
     expect(html).toContain("Reviewing 1 source…");
     expect(html).toContain("Returned final summary");
-    expect(html).toContain("The chair’s final word");
-    expect(html).not.toContain("Earlier verdict");
+    expect(html).toContain("Council ruling");
+    expect(html).toContain("NVDA SELL");
+    expect(html).toContain("Earlier verdict");
   });
 });

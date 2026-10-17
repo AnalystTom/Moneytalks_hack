@@ -7,9 +7,9 @@ type Props = {
   verdicts: Partial<Record<Member, Verdict>>;
   sources: Partial<Record<Member, Source[]>>;
   chair?: Chair;
-  onSelect: (member: Member) => void;
+  onSelect: (member: Member | "chair") => void;
 };
-const seats: Member[] = ["leopold", "buffett", "burry", "cramer"];
+const seats: Member[] = ["leopold", "buffett", "dalio", "burry", "cramer"];
 
 function SignalIcon({ signal }: { signal?: Verdict["signal"] }) {
   return (
@@ -57,13 +57,11 @@ export default function Boardroom({
       <div className="council-seats">
         {seats.map((member) => {
           const verdict = verdicts[member];
-          const ruling = member === "buffett" ? chair : undefined;
-          const signal = ruling?.overall_signal || verdict?.signal;
+          const signal = verdict?.signal;
           const sourceCount = (sources[member] || []).filter((source) =>
             sourceUrl(source.url),
           ).length;
           const line =
-            ruling?.summary ||
             verdict?.headline ||
             statuses[member] ||
             (sourceCount
@@ -82,9 +80,7 @@ export default function Boardroom({
               >
                 <SignalIcon signal={signal} />
                 <span className="bubble-copy">
-                  <small>
-                    {ruling ? "The chair’s final word" : signal || "Pending"}
-                  </small>
+                  <small>{signal || "Pending"}</small>
                   <strong>{line}</strong>
                   <span className="bubble-more">View more ↗</span>
                 </span>
@@ -94,7 +90,7 @@ export default function Boardroom({
                 onClick={() => onSelect(member)}
                 aria-label={`View ${members[member].name}`}
               >
-                <img src={`/portraits/${member}.png`} alt="" />
+                <img src={members[member].portrait} alt="" />
               </button>
               <button className="seat-label" onClick={() => onSelect(member)}>
                 <strong>{members[member].name}</strong>
@@ -104,6 +100,26 @@ export default function Boardroom({
           );
         })}
       </div>
+      {chair && (
+        <button className="ruling-banner" onClick={() => onSelect("chair")}>
+          <SignalIcon signal={chair.overall_signal} />
+          <span className="bubble-copy">
+            <small>Council ruling · the chair</small>
+            <strong>{chair.summary}</strong>
+            <span className="ruling-chips">
+              {chair.positions.slice(0, 4).map((name) => (
+                <b
+                  key={name.ticker}
+                  className={`signal ${name.signal.toLowerCase()}`}
+                >
+                  {name.ticker} {name.signal}
+                </b>
+              ))}
+            </span>
+          </span>
+          <span className="bubble-more">View more ↗</span>
+        </button>
+      )}
       <div className="table-surface" aria-hidden="true">
         <div className="curved-table" />
       </div>

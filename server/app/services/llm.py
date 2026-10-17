@@ -7,6 +7,7 @@ import httpx
 from app.config import env
 
 BASE_URL = "https://api.nicrron.ai/v1"
+DEFAULT_MODEL = "anthropic/claude-opus-5-5"
 RETRY_STATUS = {429, 500, 502, 503, 504}
 ATTEMPTS = 4
 _slots: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}  # one per event loop: a semaphore binds to its loop
@@ -14,6 +15,12 @@ _slots: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}  # one per event
 
 def enabled() -> bool:
     return bool(env("NICRRON_API_KEY"))
+
+
+def model() -> str:
+    """Claude Opus 5.5 unless NICRRON_MODEL names something other than the router default."""
+    name = env("NICRRON_MODEL")
+    return DEFAULT_MODEL if name in ("", "nicrron/auto") else name
 
 
 def _limit() -> asyncio.Semaphore:
@@ -40,7 +47,7 @@ async def complete_json(system: str, user: str) -> dict:
                 f"{BASE_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {env('NICRRON_API_KEY')}"},
                 json={
-                    "model": env("NICRRON_MODEL", "nicrron/auto"),
+                    "model": model(),
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 },
             )
