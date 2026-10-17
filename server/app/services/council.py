@@ -99,7 +99,8 @@ def audio_url(member: str, text: str) -> str:
 
 
 def _persona(member: str) -> str:
-    return (COUNCIL_DIR / f"{'orchestrator' if member == CHAIR else member}.md").read_text()
+    text = (COUNCIL_DIR / f"{'orchestrator' if member == CHAIR else member}.md").read_text()
+    return text.split("**v1 voice mode only:**")[0]  # text chat: leave out the voice-tag format
 
 
 def _brief_text(brief: dict) -> str:
@@ -382,7 +383,7 @@ async def _reply(member: str, run_id: str, run: dict, text: str, said: list[tupl
         + f"\nYour sources: {json.dumps([s.model_dump() for s in sources])}\n{_history(run)}"
         + "".join(f"\n{m} (this turn): {t}" for m, t in said) + f"\nUser: {text}"
     )
-    return str((await llm.complete_json(system, user)).get("text", "")).strip() or "I'll pass on that one."
+    return await llm.complete_reply(system, user) or "I'll pass on that one."
 
 
 async def _close(run_id: str, run: dict, text: str, said: list[tuple[str, str]], reason: str) -> dict:
@@ -407,23 +408,27 @@ async def _close(run_id: str, run: dict, text: str, said: list[tuple[str, str]],
         user = _history(run) + "".join(f"\n{m}: {t}" for m, t in said) + f"\nUser asked: {text}"
         try:
             out = await llm.complete_json(system, user)
-            line, chips = str(out.get("text") or line), [str(s) for s in out.get("suggestions") or chips][:3]
-        except ValueError:
-            pass
+            line, chips = llm.strip_tags(str(out.get("text") or line)), [llm.strip_tags(str(s)) for s in out.get("suggestions") or chips][:3]
+        except Exception as e:  # keep the canned close line and chips
+            log.warning("chat close fell back to canned: %s", e)
     return {"text": line, "suggestions": chips[:3]}
 
 
 async def _chair_answer(run: dict, text: str) -> str:
-    chair: Chair | None = run["chair"]
-    if not llm.enabled() or not chair:
-        verdicts = run["verdicts"]
-        count = lambda sig: {m: sum(p.signal == sig for p in v.positions) for m, v in verdicts.items()}  # noqa: E731
-        most = lambda sig: max(count(sig).items(), key=lambda mc: mc[1], default=(None, 0))  # noqa: E731
-        (bull, nb), (bear, ns) = most("BUY"), most("SELL")
-        return (f"{chair.consensus if chair else 'No ruling yet'}. Most bullish: {coordinator.DISPLAY[bull] + f' ({nb} BUY calls)' if nb else 'nobody'}. "
-                f"Most bearish: {coordinator.DISPLAY[bear] + f' ({ns} SELL calls)' if ns else 'nobody'}.")
+    if not llm.enabled() or not run["chair"]:
+        return _canned_chair(run)
     system = f"{_persona(CHAIR)}\nAnswer the user's question about the conversation in 1-3 sentences. Reply with only a JSON object: {{\"text\":str}}."
-    return str((await llm.complete_json(system, _history(run) + f"\nUser: {text}")).get("text", "")).strip()
+    return await llm.complete_reply(system, _history(run) + f"\nUser: {text}")
+
+
+def _canned_chair(run: dict) -> str:
+    chair: Chair | None = run["chair"]
+    verdicts = run["verdicts"]
+    count = lambda sig: {m: sum(p.signal == sig for p in v.positions) for m, v in verdicts.items()}  # noqa: E731
+    most = lambda sig: max(count(sig).items(), key=lambda mc: mc[1], default=(None, 0))  # noqa: E731
+    (bull, nb), (bear, ns) = most("BUY"), most("SELL")
+    return (f"{chair.consensus if chair else 'No ruling yet'}. Most bullish: {coordinator.DISPLAY[bull] + f' ({nb} BUY calls)' if nb else 'nobody'}. "
+            f"Most bearish: {coordinator.DISPLAY[bear] + f' ({ns} SELL calls)' if ns else 'nobody'}.")
 
 
 def chat(run: dict, run_id: str, text: str, to: list[str], roast: bool) -> AsyncIterator[str]:
@@ -436,7 +441,12 @@ def chat(run: dict, run_id: str, text: str, to: list[str], roast: bool) -> Async
         run["history"].append({"role": "user", "text": text})
         said: list[tuple[str, str]] = []
         for m in speakers:
-            reply = await _chair_answer(run, text) if m == CHAIR else await _reply(m, run_id, run, text, said, turn_roast, emit)
+            try:
+                reply = await _chair_answer(run, text) if m == CHAIR else await _reply(m, run_id, run, text, said, turn_roast, emit)
+            except Exception as e:  # one speaker's failure must not end the turn: canned line, failure traced for PRISM
+                log.warning("chat reply from %s fell back to canned: %s", m, e)
+                await prism.span(run_id, f"chat.{m}", "agent", text, f"{type(e).__name__}: {e}", ok=False)
+                reply = _canned_chair(run) if m == CHAIR else _canned_reply(m, run, text, said, turn_roast)
             said.append((m, reply))
             run["history"].append({"role": m, "text": reply})
             sources = [] if m == CHAIR else [s.model_dump() for s in run["sources"].get(m, [])]

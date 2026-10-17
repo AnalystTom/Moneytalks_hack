@@ -107,7 +107,7 @@ def _numbers(text: str) -> list[float]:
     out = []
     for tok in NUMBER.findall(text):
         try:
-            out.append(float(tok.strip("+$%").replace(",", "")))
+            out.append(float(tok.replace("$", "").replace(",", "").strip("+%")))  # "-$10,850" -> -10850
         except ValueError:
             pass
     return out
@@ -131,7 +131,7 @@ def unsupported(v: Analysis, brief: dict, sources: list | None = None) -> list[s
     corpus = _numbers(json.dumps(brief["facts"])) + _numbers(brief["persona"])
     corpus += [n for s in (sources if sources is not None else getattr(v, "sources", [])) for n in _numbers(s.quote)]
     corpus += [abs(n) for n in corpus]
-    return sorted({tok for t in _texts(v) for tok in NUMBER.findall(t) if not _supported(_numbers(tok)[0], corpus)})
+    return sorted({tok for t in _texts(v) for tok in NUMBER.findall(t) if not all(_supported(n, corpus) for n in _numbers(tok))})
 
 
 def strip_unsupported(v: Analysis, bad: list[str]) -> Analysis:

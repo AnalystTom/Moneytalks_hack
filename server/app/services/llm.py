@@ -31,9 +31,8 @@ def _wait(r: httpx.Response, attempt: int) -> float:
         return 1.5 * 2**attempt  # 1.5s, 3s, 6s
 
 
-async def complete_json(system: str, user: str) -> dict:
-    """One Nicrron (OpenAI-compatible) chat completion whose reply must be a JSON object.
-    Rate limits and server errors are retried with backoff."""
+async def complete_text(system: str, user: str) -> str:
+    """One Nicrron (OpenAI-compatible) chat completion; rate limits and server errors are retried with backoff."""
     async with _limit(), httpx.AsyncClient(timeout=90) as client:
         for attempt in range(ATTEMPTS):
             r = await client.post(
@@ -48,8 +47,32 @@ async def complete_json(system: str, user: str) -> dict:
                 break
             await asyncio.sleep(_wait(r, attempt))
     r.raise_for_status()
-    text = r.json()["choices"][0]["message"]["content"]
+    return r.json()["choices"][0]["message"]["content"] or ""
+
+
+async def complete_json(system: str, user: str) -> dict:
+    """A completion whose reply must be a JSON object."""
+    text = await complete_text(system, user)
     match = re.search(r"\{.*\}", text, re.DOTALL)  # models sometimes wrap JSON in prose or fences
     if not match:
         raise ValueError("Nicrron reply contained no JSON object")
     return json.loads(match.group(0))
+
+
+VOICE_TAG = re.compile(r"</?(?:chair|buffett|dalio|burry|leopold|cramer)>", re.I)  # v1 voice-mode markup, not for text chat
+
+
+def strip_tags(text: str) -> str:
+    return VOICE_TAG.sub("", text).strip()
+
+
+async def complete_reply(system: str, user: str) -> str:
+    """A spoken/chat line: the "text" field when the model answers in JSON, else its prose as-is."""
+    text = strip_tags(await complete_text(system, user))
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return strip_tags(str(json.loads(match.group(0)).get("text", "")))
+        except (ValueError, AttributeError):
+            pass
+    return re.sub(r"^```\w*\s*|\s*```$", "", text).strip()

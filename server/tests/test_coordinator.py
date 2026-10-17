@@ -47,3 +47,10 @@ def test_route():
     assert route("Is KO a bubble?") == ["burry", "buffett"]  # no BUY call on file: a non-AI name gets Warren
     assert route("NVDA thoughts?") == ["burry", "leopold"]
     assert route("Should I worry about inflation?") == ["dalio", "buffett"]
+
+
+def test_numbers_parse_signed_dollars_and_tags_are_stripped():
+    from app.services import llm
+
+    assert coordinator._numbers("drag of -$10,850 and +$1,234.5") == [-10850.0, 1234.5]
+    assert llm.strip_tags("<chair>The floor is yours.</chair>") == "The floor is yours."
