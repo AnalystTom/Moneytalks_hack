@@ -239,6 +239,41 @@ def test_follow_up_asks_one_worker_with_its_earlier_verdict(client, brief_id, fa
     assert client.post("/api/council/ask", json={"run_id": run_id, "member": "nobody", "question": "q"}).status_code == 422
 
 
+@pytest.mark.parametrize("member", ["buffett", "burry", "cramer", "dalio", "leopold"])
+def test_follow_ups_use_each_members_latest_successful_verdict(client, brief_id, fake, member):
+    first = run(client, brief_id)
+    run_id = first[0][1]["run_id"]
+    original = dict(council.RUNS[run_id]["verdicts"])
+    fake.verdict = {**VERDICT, "signal": "HOLD", "headline": "Hold after new constraints", "reasons": ["Cash is needed next month"]}
+    follow = parse_sse(client.post("/api/council/ask", json={"run_id": run_id, "member": member, "question": "Reconsider with my new constraints"}).text)
+    assert follow[-1][0] == "run.done"
+    assert council.RUNS[run_id]["verdicts"][member].model_dump() == fake.verdict
+    fake.calls.clear()
+    fake.verdict = {**VERDICT, "signal": "BUY", "headline": "Buy after updated liquidity", "reasons": ["Cash needs are covered"]}
+    follow = parse_sse(client.post("/api/council/ask", json={"run_id": run_id, "member": member, "question": "Why did you change to HOLD?"}).text)
+    assert follow[-1][0] == "run.done"
+    prompt = fake.calls[0][1][1]["content"]
+    assert "Hold after new constraints. Cash is needed next month" in prompt
+    assert council.RUNS[run_id]["verdicts"][member].model_dump() == fake.verdict
+    assert {m: v for m, v in council.RUNS[run_id]["verdicts"].items() if m != member} == {m: v for m, v in original.items() if m != member}
+
+
+@pytest.mark.parametrize("failure", ["worker", "speech"])
+def test_failed_follow_up_preserves_previous_verdict(client, brief_id, fake, monkeypatch, failure):
+    first = run(client, brief_id)
+    run_id = first[0][1]["run_id"]
+    original = dict(council.RUNS[run_id]["verdicts"])
+    fake.verdict = {**VERDICT, "signal": "HOLD"}
+
+    async def fail(*args, **kwargs):
+        raise ValueError("follow-up failed")
+
+    monkeypatch.setattr(agents if failure == "worker" else council, "run" if failure == "worker" else "_speak", fail)
+    events = parse_sse(client.post("/api/council/ask", json={"run_id": run_id, "member": "burry", "question": "Reconsider"}).text)
+    assert events[-1][0] == "run.error"
+    assert council.RUNS[run_id]["verdicts"] == original
+
+
 async def test_audio_cache_is_bounded(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
     monkeypatch.setenv("ELEVENLABS_VOICE_BURRY", "v")
@@ -389,7 +424,8 @@ async def test_cancellation_awaits_owned_speech_before_finishing_trace(fake, mon
     monkeypatch.setattr(council, "_rule", rule)
     monkeypatch.setattr(prism.Trace, "finish", finish)
     if follow_up:
-        stream = council.ask({"brief": brief, "verdicts": {}}, "ask-test", "burry", "q", False)
+        prior_run = {"brief": brief, "verdicts": {}}
+        stream = council.ask(prior_run, "ask-test", "burry", "q", False)
     else:
         _, stream = council.start_run(brief, "q", False)
 
@@ -405,6 +441,8 @@ async def test_cancellation_awaits_owned_speech_before_finishing_trace(fake, mon
         with pytest.raises(asyncio.CancelledError):
             await consumer
     assert stopped == active and finished == [False]
+    if follow_up:
+        assert prior_run["verdicts"] == {}
 
 
 @pytest.mark.parametrize("name", ["persona_profile", "portfolio_lookup", "specialist_row", "web_search"])

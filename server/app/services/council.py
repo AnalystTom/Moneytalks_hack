@@ -211,6 +211,7 @@ def ask(run: dict, run_id: str, member: str, question: str, roast: bool) -> Asyn
             await orch.finish(str(e) or type(e).__name__, ok=False)
             raise
         await orch.finish(verdict.headline)
+        run["verdicts"][member] = verdict
         return {"trace_id": trace_id}
 
     return _stream(body, run_id)
