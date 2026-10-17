@@ -769,35 +769,7 @@ h4 {
     transform: scale(1.06);
   }
 }
-@media (max-width: 1100px) {
-  .topbar {
-    padding: 0 24px;
-  }
-  .layout {
-    grid-template-columns: minmax(0, 1fr) 350px;
-  }
-  .council-seats {
-    gap: 6px;
-    padding: 12px 12px 40px;
-  }
-  .speech-bubble {
-    height: 196px;
-    padding: 10px 8px;
-    flex-direction: column;
-  }
-  .bubble-icon {
-    width: 22px;
-    height: 22px;
-    flex-basis: 22px;
-  }
-  .seat-label strong {
-    font-size: 10px;
-  }
-  .seat-label small {
-    font-size: 8px;
-  }
-}
-@media (min-width: 851px) and (max-height: 800px) {
+@media (max-width: 1350px), (max-height: 800px) {
   .app {
     height: auto;
     min-height: 100dvh;
@@ -813,11 +785,7 @@ h4 {
     height: auto;
   }
 }
-@media (max-width: 850px) {
-  .app {
-    height: auto;
-    min-height: 100dvh;
-  }
+@media (max-width: 1350px) {
   .topbar {
     min-height: 76px;
     padding: 14px 18px;
@@ -840,7 +808,6 @@ h4 {
   }
   .layout {
     grid-template-columns: 1fr;
-    overflow: visible;
   }
   .scene-heading {
     padding: 18px 20px 4px;
@@ -849,12 +816,10 @@ h4 {
     font-size: 28px;
   }
   .boardroom {
-    height: auto;
     min-height: 0;
   }
   .council-seats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    height: auto;
     gap: 26px 18px;
     padding: 12px 20px 60px;
   }
@@ -868,7 +833,8 @@ h4 {
     height: 200px;
   }
   .speech-bubble {
-    height: 158px;
+    height: auto;
+    min-height: 158px;
     flex-direction: row;
   }
   .panel {
