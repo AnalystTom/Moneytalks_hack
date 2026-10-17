@@ -42,7 +42,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 
 ## Stack
 
-- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 planned for briefs, runs and cached events. See [deployment](../server/README.md#deploy-cloudflare) for current storage limits. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
+- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 holding briefs and runs (cached events are still planned). See [deployment](../server/README.md#deploy-cloudflare) for current storage. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
 - Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Research: per-member PRISM Knowledge Base retrieval; live web search is not connected.

@@ -4,9 +4,9 @@ import json
 import re
 import uuid
 
-from app.services import market, plaid
+from app.services import market, plaid, store
 
-BRIEFS: dict[str, dict] = {}  # shortcut: in-memory, lost on restart; move to D1 with the Cloudflare port
+BRIEFS: dict[str, dict] = {}  # cache in front of the durable store
 EXTRA = ("name", "sector", "beta", "div_yield", "role")  # optional broker-snapshot fields kept per holding
 
 
@@ -123,8 +123,15 @@ async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, accou
         parts.append(profile)
     summary = "; ".join(parts)
     brief_id = uuid.uuid4().hex
-    BRIEFS[brief_id] = {
+    brief = BRIEFS[brief_id] = {
         "holdings": holdings, "prices": last, "value": f["holdings_value"], "pnl_pct": f["unrealized_pl_pct"], "bank": bank,
         "account": account, "facts": f, "persona": persona, "summary": summary,
     }
+    await store.save("brief", brief_id, brief)
     return brief_id, summary
+
+
+async def get_brief(brief_id: str) -> dict | None:
+    if brief_id not in BRIEFS and (brief := await store.load("brief", brief_id)):
+        BRIEFS[brief_id] = brief
+    return BRIEFS.get(brief_id)

@@ -12,8 +12,8 @@ def _sse(stream) -> StreamingResponse:
     return StreamingResponse(stream, media_type="text/event-stream", headers=HEADERS)
 
 
-def _run(run_id: str) -> dict:
-    run = council.RUNS.get(run_id)
+async def _run(run_id: str) -> dict:
+    run = await council.get_run(run_id)
     if not run:
         raise HTTPException(404, "unknown run_id")
     if not run["verdicts"]:
@@ -23,7 +23,7 @@ def _run(run_id: str) -> dict:
 
 @router.post("/run")
 async def run(req: RunRequest) -> StreamingResponse:
-    brief = ingest.BRIEFS.get(req.brief_id)
+    brief = await ingest.get_brief(req.brief_id)
     if not brief:
         raise HTTPException(404, "unknown brief_id")
     _, stream = council.start_run(brief, req.question, req.roast)
@@ -32,9 +32,9 @@ async def run(req: RunRequest) -> StreamingResponse:
 
 @router.post("/chat")
 async def chat(req: ChatRequest) -> StreamingResponse:
-    return _sse(council.chat(_run(req.run_id), req.run_id, req.text, req.to, req.roast))
+    return _sse(council.chat(await _run(req.run_id), req.run_id, req.text, req.to, req.roast))
 
 
 @router.post("/ask")  # older clients: one named member; same stream as chat
 async def ask(req: AskRequest) -> StreamingResponse:
-    return _sse(council.chat(_run(req.run_id), req.run_id, req.question, [req.member], req.roast))
+    return _sse(council.chat(await _run(req.run_id), req.run_id, req.question, [req.member], req.roast))

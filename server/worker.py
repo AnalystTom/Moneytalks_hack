@@ -1,7 +1,7 @@
 """Cloudflare Python Worker entry: serves the FastAPI app under /api; web/dist is served as static assets.
 
-The app keeps briefs and runs in memory (see app/services/ingest.py), so every request is forwarded to one
-Durable Object instance instead of whichever isolate the Worker lands on.
+Briefs and runs are written to D1 (app/services/store.py) so they survive the Durable Object being evicted or
+redeployed; requests still go to one Durable Object instance so its in-memory cache stays warm.
 """
 import os
 
@@ -24,12 +24,14 @@ class Council(DurableObject):
             if isinstance(value, str):
                 os.environ[key] = value
         from app.main import app
+        from app.services import store
 
+        store.bind(getattr(self.env, "DB", None))
         return await asgi.fetch(app, request.js_object, self.env)
 
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        # shortcut: one Durable Object serves all traffic and loses briefs/runs on eviction, move them to D1 (spec) before real load.
+        # shortcut: one Durable Object serves all traffic, shard by brief/run id before real load.
         stub = self.env.COUNCIL.getByName("main")
         return await stub.fetch(request.js_object)

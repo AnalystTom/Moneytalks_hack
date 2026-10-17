@@ -232,6 +232,12 @@ export default function App() {
   >(undefined);
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioMember = useRef<Member | undefined>(undefined);
+  // Spoken answers play one after another off to the side, so the stream (and the composer) never waits on them.
+  const speech = useRef({
+    abort: new AbortController(),
+    tail: Promise.resolve(),
+    pending: 0,
+  });
   const soundEnabled = useRef(sound);
   const voiceEnabled = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
@@ -252,7 +258,7 @@ export default function App() {
     () => () => {
       controller.current?.abort();
       contextController.current?.abort();
-      audio.current?.pause();
+      stopSpeech();
       void audioContext.current?.close();
     },
     [],
@@ -329,7 +335,7 @@ export default function App() {
         setSelected(undefined);
         setStage("Your seat is waiting.");
         setAudioUrl("");
-        audio.current?.pause();
+        stopSpeech();
       }
       return brief.brief_id;
     } catch (cause) {
@@ -476,6 +482,35 @@ export default function App() {
       });
     });
   }
+  function stopSpeech() {
+    if (speech.current.pending) audio.current?.pause();
+    speech.current.abort.abort();
+    speech.current = {
+      abort: new AbortController(),
+      tail: Promise.resolve(),
+      pending: 0,
+    };
+  }
+  function speak(member: Member, url: string) {
+    const queue = speech.current;
+    queue.pending++;
+    queue.tail = queue.tail
+      .then(async () => {
+        const { signal } = queue.abort;
+        if (signal.aborted) return;
+        if (voiceEnabled.current && soundEnabled.current) {
+          await playAudio(url, signal, member);
+        } else {
+          setAnimation((previous) => ({ ...previous, [member]: "speaking" }));
+          await pause(1200);
+          setAnimation((previous) => ({ ...previous, [member]: "idle" }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        queue.pending--;
+      });
+  }
   async function receive(event: CouncilEvent, signal: AbortSignal) {
     if (signal.aborted) return;
     setAnimation((previous) => animateEvent(previous, event));
@@ -562,20 +597,8 @@ export default function App() {
         setSuggestions(event.data.suggestions);
         break;
       case "member.audio":
-        if (event.data.member === "chair") break;
-        if (voiceEnabled.current && soundEnabled.current) {
-          await playAudio(event.data.audio_url, signal, event.data.member);
-        } else {
-          setAnimation((previous) => ({
-            ...previous,
-            [event.data.member]: "speaking",
-          }));
-          await pause(1200);
-          setAnimation((previous) => ({
-            ...previous,
-            [event.data.member]: "idle",
-          }));
-        }
+        if (event.data.member !== "chair")
+          speak(event.data.member, event.data.audio_url);
         break;
       case "run.done":
         setRunFinished(true);
@@ -603,6 +626,7 @@ export default function App() {
         if (!abort.signal.aborted) timeout = setTimeout(timedOut, 180000);
       }
     };
+    stopSpeech(); // a new question never waits for the previous answers to finish being read aloud
     setBusy(true);
     setError("");
     setAudioMessage("");
@@ -614,20 +638,11 @@ export default function App() {
       setAudioUrl("");
       await checkVoice(abort.signal);
       abort.signal.throwIfAborted();
-      if (follow) {
-        setSuggestions([]);
-        await streamCouncil(
-          "/api/council/chat",
-          {
-            run_id: runId,
-            text: message,
-            to: replyTo ? [replyTo] : [],
-            roast,
-          },
-          abort.signal,
-          receiveEvent,
-        );
-      } else {
+      const lost = (cause: unknown, detail: string) =>
+        !abort.signal.aborted &&
+        cause instanceof Error &&
+        cause.message === detail;
+      const freshRun = async () => {
         setRunId("");
         setSuggestions([]);
         setChair(undefined);
@@ -646,19 +661,37 @@ export default function App() {
         try {
           await run(context.briefId);
         } catch (cause) {
-          // The server forgot the brief (redeploy, new isolate): re-ingest the
-          // context we still hold and retry once before surfacing an error.
-          if (
-            abort.signal.aborted ||
-            !(cause instanceof Error) ||
-            cause.message !== "unknown brief_id"
-          )
-            throw cause;
-          const briefId = await loadContext(abort.signal);
-          if (!briefId) throw cause;
-          setStage("The council is considering your question.");
-          await run(briefId);
+          // The server forgot the brief: re-ingest the context we still
+          // hold and retry once before surfacing an error.
+          if (lost(cause, "unknown brief_id")) {
+            const briefId = await loadContext(abort.signal);
+            if (!briefId) throw cause;
+            setStage("The council is considering your question.");
+            await run(briefId);
+          } else throw cause;
         }
+      };
+      if (follow) {
+        setSuggestions([]);
+        try {
+          await streamCouncil(
+            "/api/council/chat",
+            {
+              run_id: runId,
+              text: message,
+              to: replyTo ? [replyTo] : [],
+              roast,
+            },
+            abort.signal,
+            receiveEvent,
+          );
+        } catch (cause) {
+          // The server forgot the session: answer the follow-up as a fresh one.
+          if (!lost(cause, "unknown run_id")) throw cause;
+          await freshRun();
+        }
+      } else {
+        await freshRun();
       }
     } catch (cause) {
       const expired =
@@ -687,7 +720,7 @@ export default function App() {
       setBusy(false);
       setDrumming(false);
       setActive(undefined);
-      setAnimation({});
+      if (!speech.current.pending) setAnimation({});
     }
   }
   function submit(event: FormEvent) {
@@ -975,7 +1008,7 @@ export default function App() {
             <VoiceInput
               disabled={busy || loadingContext || !context}
               onBusyChange={(value) => {
-                if (value) audio.current?.pause();
+                if (value) stopSpeech();
                 setVoiceBusy(value);
               }}
               onTranscript={(text) =>
@@ -1010,7 +1043,7 @@ export default function App() {
                   className="cancel-send"
                   aria-label="Cancel session"
                   onClick={() => {
-                    audio.current?.pause();
+                    stopSpeech();
                     controller.current?.abort(
                       "Council cancelled. Your message is preserved.",
                     );

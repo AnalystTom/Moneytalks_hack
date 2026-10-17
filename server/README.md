@@ -22,8 +22,8 @@ Demo without the web app: open `http://localhost:8000/demo`, click **Load Jordan
 ## Deploy (Cloudflare)
 
 One Worker named `council` serves `web/dist` as static assets and the FastAPI app (Python Workers) under `/api/*`.
-Because briefs and runs live in memory, `worker.py` forwards every `/api` request to a single Durable Object so
-ingest and run hit the same instance; state is lost when that object is evicted or redeployed.
+Briefs and runs are stored in D1 (see below), so they survive the Durable Object being evicted or redeployed;
+`worker.py` still forwards every `/api` request to a single Durable Object, which keeps them cached in memory.
 
 From the repository root, with Node 22 and `uv` on PATH:
 
@@ -45,8 +45,8 @@ Non-Python data the app reads at runtime (`council/*.md`) is bundled via `rules`
 ### D1 database
 
 `wrangler.jsonc` binds the D1 database `council` as `DB`, available inside the Durable Object as `self.env.DB`.
-The app does not use this binding yet; no D1 schema or seed script is included. From `server/`, run SQL against
-the live database with `npx wrangler d1 execute council --remote --command "SELECT 1"`.
+`app/services/store.py` keeps briefs and runs there as JSON documents in a `docs(kind, id, body)` table it creates
+on first use, so there is no schema or seed script. From `server/`, run SQL against the live database with `npx wrangler d1 execute council --remote --command "SELECT 1"`.
 
 ## Env names
 
