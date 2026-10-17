@@ -262,7 +262,10 @@ export default function App() {
     if (scroll) scroll.scrollTop = scroll.scrollHeight;
   }, [messages, busy]);
 
-  async function loadContext(signal: AbortSignal, replacement?: File) {
+  async function loadContext(
+    signal: AbortSignal,
+    replacement?: File,
+  ): Promise<string | undefined> {
     setLoadingContext(true);
     setError("");
     try {
@@ -328,6 +331,7 @@ export default function App() {
         setAudioUrl("");
         audio.current?.pause();
       }
+      return brief.brief_id;
     } catch (cause) {
       if (!signal.aborted)
         setError(
@@ -632,16 +636,29 @@ export default function App() {
         setStatuses({});
         setSelected(undefined);
         setStage("The council is considering your question.");
-        await streamCouncil(
-          "/api/council/run",
-          {
-            brief_id: context.briefId,
-            question: message,
-            roast,
-          },
-          abort.signal,
-          receiveEvent,
-        );
+        const run = (briefId: string) =>
+          streamCouncil(
+            "/api/council/run",
+            { brief_id: briefId, question: message, roast },
+            abort.signal,
+            receiveEvent,
+          );
+        try {
+          await run(context.briefId);
+        } catch (cause) {
+          // The server forgot the brief (redeploy, new isolate): re-ingest the
+          // context we still hold and retry once before surfacing an error.
+          if (
+            abort.signal.aborted ||
+            !(cause instanceof Error) ||
+            cause.message !== "unknown brief_id"
+          )
+            throw cause;
+          const briefId = await loadContext(abort.signal);
+          if (!briefId) throw cause;
+          setStage("The council is considering your question.");
+          await run(briefId);
+        }
       }
     } catch (cause) {
       const expired =
