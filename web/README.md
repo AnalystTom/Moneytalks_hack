@@ -4,12 +4,12 @@ React + Vite + TypeScript. See the [screen design](../data/spec.md#screen) for t
 
 ## Run
 
-Use Node 22 and Python 3.12. From the repository root:
+Use Node 22 and Python 3.12. Configure `.env` using the [backend environment guide](../server/README.md#env-names), then run from the repository root:
 
 ```sh
 cd server
 uv sync --python 3.12
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --env-file ../.env
 ```
 
 In a second shell:

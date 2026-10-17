@@ -119,7 +119,8 @@ Event payloads and ordering are defined in the [stream contract](../data/spec.md
 For storage limits, see [Deploy (Cloudflare)](#deploy-cloudflare). No answer caching or replay yet;
 `member.audio` URLs 503 without an ElevenLabs key. Without `ANCHOR_API_KEY` there is no web search, so
 verdict sources are data citations with no URL (the UI shows only linked sources). Source validation requires
-a matching tool title/URL and an excerpt of returned evidence; it does not verify every claim or number in the verdict.
+a matching tool title/URL and an exact excerpt of returned evidence that preserves complete numeric tokens,
+including signs, decimals, percentages and attached magnitude suffixes such as K/M/B/T. It does not verify every claim or number in the verdict.
 Worker tool results are passed in full; PRISM trace input/output text is separately capped at 8,000 characters
 (worker LLM-span input records only the first 4,000 characters of the last message). The Anchor call is untested
 against the live service. A `--env-file` run needs `python-dotenv` (a dependency now).
