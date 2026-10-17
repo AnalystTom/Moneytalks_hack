@@ -4,7 +4,9 @@ import json
 import uuid
 
 from app.services import market, plaid
+from app.services.store import put
 
+MAX_HOLDINGS = 200
 BRIEFS: dict[str, dict] = {}  # shortcut: in-memory, lost on restart; move to D1 with the Cloudflare port
 
 
@@ -21,8 +23,8 @@ def parse_holdings(filename: str, raw: bytes) -> list[dict]:
         ]
     except (KeyError, TypeError, ValueError) as e:
         raise ValueError(f"each holding needs ticker, shares and cost_basis ({e!r})") from e
-    if not holdings:
-        raise ValueError("portfolio has no holdings")
+    if not holdings or len(holdings) > MAX_HOLDINGS:
+        raise ValueError(f"portfolio needs 1-{MAX_HOLDINGS} holdings")
     return holdings
 
 
@@ -42,8 +44,8 @@ async def build_brief(holdings: list[dict], persona: str, use_plaid: bool) -> tu
         parts.append(profile[:80])
     summary = "; ".join(parts)
     brief_id = uuid.uuid4().hex
-    BRIEFS[brief_id] = {
+    put(BRIEFS, brief_id, {
         "holdings": holdings, "prices": last, "value": value, "pnl_pct": pnl, "bank": bank,
         "persona": persona, "summary": summary,
-    }
+    })
     return brief_id, summary

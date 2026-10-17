@@ -4,15 +4,16 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from urllib.parse import urlencode
 
 from app.config import COUNCIL_DIR, MEMBERS
 from app.models import Chair, Source, Verdict
 from app.services import anchor, llm, prism
+from app.services.store import put
 
 log = logging.getLogger(__name__)
 
 RUNS: dict[str, dict] = {}  # run_id -> {"brief", "question", "roast"}; in-memory, see ingest.BRIEFS
+LINES: dict[str, tuple[str, str]] = {}  # line_id -> (member, text) behind member.audio URLs
 PARALLEL = [m for m in MEMBERS if m != "buffett"]
 
 CANNED = {
@@ -34,7 +35,10 @@ def sse(event: str, data: dict) -> str:
 
 
 def audio_url(member: str, text: str) -> str:
-    return "/api/voice/speak?" + urlencode({"member": member, "text": text})
+    """Park the server-written line under an opaque id so the audio URL can't be used to voice arbitrary text."""
+    line_id = uuid.uuid4().hex
+    put(LINES, line_id, (member, text))
+    return f"/api/voice/line/{line_id}"
 
 
 def _persona(member: str) -> str:
@@ -130,7 +134,7 @@ async def _stream(body, run_id: str) -> AsyncIterator[str]:
 
 def start_run(brief: dict, question: str, roast: bool) -> tuple[str, AsyncIterator[str]]:
     run_id = uuid.uuid4().hex
-    RUNS[run_id] = {"brief": brief, "question": question, "roast": roast}
+    put(RUNS, run_id, {"brief": brief, "question": question, "roast": roast})
 
     async def body(emit) -> None:
         verdicts = dict(zip(PARALLEL, await asyncio.gather(*(_member(m, run_id, brief, question, roast, emit) for m in PARALLEL))))

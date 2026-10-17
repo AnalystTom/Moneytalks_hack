@@ -36,8 +36,14 @@ def test_speak_posts_to_member_voice(client, eleven):
     assert b"I could be wrong." in req.content
 
 
-def test_speak_get_for_audio_tags(client, eleven):
-    assert client.get("/api/voice/speak", params={"member": "burry", "text": "hi"}).content == b"ID3fake-mp3"
+def test_audio_url_speaks_only_council_lines(client, eleven, brief_id):
+    from tests.conftest import parse_sse
+
+    events = parse_sse(client.post("/api/council/run", json={"brief_id": brief_id, "question": "q"}).text)
+    url = next(d["audio_url"] for e, d in events if e == "member.audio" and d["member"] == "burry")
+    assert client.get(url).content == b"ID3fake-mp3"
+    assert client.get("/api/voice/line/forged").status_code == 404
+    assert client.get("/api/voice/speak", params={"member": "burry", "text": "hi"}).status_code == 405
 
 
 def test_speak_without_keys_is_503(client):

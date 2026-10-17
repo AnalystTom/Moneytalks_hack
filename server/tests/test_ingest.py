@@ -20,3 +20,9 @@ def test_ingest_json_without_plaid(client):
 def test_ingest_rejects_bad_portfolio(client):
     r = client.post("/api/ingest", files={"portfolio": ("p.csv", b"ticker\nVOO\n"), "persona": ("persona.md", PERSONA)})
     assert r.status_code == 422
+
+
+def test_ingest_rejects_oversize_upload(client):
+    big = b"ticker,shares,cost_basis\n" + b"VOO,1,1\n" * 200_000
+    r = client.post("/api/ingest", files={"portfolio": ("p.csv", big), "persona": ("persona.md", PERSONA)})
+    assert r.status_code == 413

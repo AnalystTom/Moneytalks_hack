@@ -52,10 +52,10 @@ curl -X POST localhost:8000/api/voice/speak -H 'content-type: application/json' 
 Events and payloads are the spec's table. Order: `run.started`; the three other members in parallel
 (`member.status` researching -> `member.source` -> thinking -> `member.verdict`); then Warren's own
 verdict; `chair.summary`; a `member.status` speaking -> `member.audio` -> done triple per member
-(`member.audio.audio_url` is `GET /api/voice/speak?member=&text=`, playable in an `<audio>` tag);
+(`member.audio.audio_url` is `GET /api/voice/line/<id>`, which only speaks lines the council wrote; playable in an `<audio>` tag);
 `run.done` (or `run.error`).
 
 ## Known limits
 
 Briefs and runs live in memory (lost on restart); no answer caching or replay yet (spec says D1);
-canned `member.audio` URLs 503 without ElevenLabs keys; sources are the Anchor stub's placeholder.
+canned `member.audio` URLs 503 without ElevenLabs keys; uploads capped at 1 MB / 64 KB, stores keep the last 500 entries; `POST /api/voice/speak` (required by the contract) has no auth or rate limit, so put it behind auth/limits and set `CORS_ORIGINS` before a public deploy; sources are the Anchor stub's placeholder.

@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from app.models import Member, SpeakRequest
-from app.services import elevenlabs
+from app.models import SpeakRequest
+from app.services import council, elevenlabs
 
 router = APIRouter(prefix="/voice")
 
@@ -19,6 +19,8 @@ async def post_speak(req: SpeakRequest) -> Response:
     return await _speak(req.member, req.text)
 
 
-@router.get("/speak")  # the `audio_url` in member.audio events points here so an <audio> tag can play it
-async def get_speak(member: Member, text: str = Query(min_length=1, max_length=2500)) -> Response:
-    return await _speak(member, text)
+@router.get("/line/{line_id}")  # the `audio_url` in member.audio events; only speaks lines the council wrote
+async def get_line(line_id: str) -> Response:
+    if line_id not in council.LINES:
+        raise HTTPException(404, "unknown line")
+    return await _speak(*council.LINES[line_id])
