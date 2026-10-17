@@ -1,0 +1,16 @@
+{
+  "name": "council",
+  "main": "worker.py",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["python_workers"],
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": { "bindings": [{ "name": "COUNCIL", "class_name": "Council" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Council"] }],
+  "rules": [{ "type": "Text", "globs": ["council/*.md"], "fallthrough": true }],
+  "observability": { "enabled": true }
+}

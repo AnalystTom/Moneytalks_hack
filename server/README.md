@@ -13,6 +13,22 @@ uv run uvicorn app.main:app --reload --port 8000 --env-file ../.env   # --env-fi
 uv run pytest
 ```
 
+## Deploy (Cloudflare)
+
+One Worker named `council` serves `web/dist` as static assets and the FastAPI app (Python Workers) under `/api/*`.
+Because briefs and runs live in memory, `worker.py` forwards every `/api` request to a single Durable Object so
+ingest and run hit the same instance; state is lost when that object is evicted or redeployed.
+
+```sh
+npx wrangler login          # once
+./set-secrets.sh .env       # uploads NICRRON_*, PRISMTRACE_*, ELEVENLABS_* ... as Worker secrets
+./deploy.sh                 # builds web/, then `pywrangler deploy` (needs node 22 and uv)
+```
+
+Live at https://council.thomasmann2001.workers.dev. `deploy.sh` is the redeploy; secrets persist across deploys.
+`worker.py` copies the names in `ENV_NAMES` from the Worker env into `os.environ`; add new env names there.
+Non-Python data the app reads at runtime (`council/*.md`) is bundled via `rules` in `wrangler.jsonc`.
+
 ## Env names
 
 Copy `../.env.example` to `../.env`. All optional.
