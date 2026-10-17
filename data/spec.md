@@ -51,21 +51,21 @@ The scene and chat only render events; they never call models.
 
 Events (`event:` name, JSON `data:`):
 
-| event | data |
-|---|---|
-| `run.started` | `run_id` |
-| `member.status` | `member`, `status`: `researching` / `thinking` / `speaking` / `done` |
-| `member.source` | `member`, `title`, `url` |
-| `member.verdict` | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]` |
-| `chair.summary` | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren) |
-| `member.audio` | `member`, `audio_url` (ElevenLabs speech for that member's line) |
-| `run.done` / `run.error` | `run_id` / `message` |
+| event                    | data                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run.started`            | `run_id`                                                                                                                                   |
+| `member.status`          | `member`, `status`: `researching` / `thinking` / `speaking` / `done`                                                                       |
+| `member.source`          | `member`, `title`, `url`                                                                                                                   |
+| `member.verdict`         | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]` |
+| `chair.summary`          | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren)                                                                   |
+| `member.audio`           | `member`, `audio_url` (ElevenLabs speech for that member's line)                                                                           |
+| `run.done` / `run.error` | `run_id` / `message`                                                                                                                       |
 
 `member` is one of `buffett`, `cramer`, `burry`, `leopold`.
 
 ## Council members
 
-One file per member in `server/council/<member>.md`: philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, *Situational Awareness* for Leopold).
+One file per member in `server/council/<member>.md`: philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, _Situational Awareness_ for Leopold).
 
 ## Stack
 
@@ -100,11 +100,11 @@ The earlier TypeScript starter (working Nicrron call + PRISM trace and span inge
 
 ## Later
 
-| | v1 | v2 |
-|---|---|---|
-| UI | Talking heads | Live voice conversation |
-| Research | Deep research; earnings (Apple, Comcast); NA + Europe | Socials |
-| Bank data | Plaid Link (real connect flow) | - |
+|           | v1                                                    | v2                      |
+| --------- | ----------------------------------------------------- | ----------------------- |
+| UI        | Talking heads                                         | Live voice conversation |
+| Research  | Deep research; earnings (Apple, Comcast); NA + Europe | Socials                 |
+| Bank data | Plaid Link (real connect flow)                        | -                       |
 
 ## Out of scope for v0
 
