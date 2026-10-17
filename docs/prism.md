@@ -1,12 +1,16 @@
 # PRISM proofs
 
-Project `6deadd60-9c2a-4ee7-bd40-608c187fa024` (Meta Workspace) at https://prism.blockconvey.com. Council members are PRISM agents `council.<member>`; every member turn is one trace (session id = council `run_id`) with spans `council.<member>` (agent), `anchor.search` (tool), `kb.search` (retrieval) and `grounding.check`.
+Project `6deadd60-9c2a-4ee7-bd40-608c187fa024` (Meta Workspace) at https://prism.blockconvey.com. The judging results below were captured before the council-v0 integration, when each member turn included `anchor.search`, `kb.search` and `grounding.check` spans. The current backend records separate stage traces via `prism.span`, with session id = council `run_id`; it does not emit those historical tool/retrieval steps. Current research behavior is documented in the [council pipeline](../server/council/README.md#3-each-specialist-in-parallel-analyse---research-names---advise).
 
 **The demo in one line:** v1 members invent figures the client file never contained (Cramer: "a $500 monthly plan"); v2 retrieves from each member's Knowledge Base and is told to use only provided figures; the same 18 questions (50 runs each) score 10% grounded on v1 and 64% on v2 in the PRISM evaluator (Buffett), and 61.5% vs 92% on the local check across all four members.
 
 ## 1. Knowledge Base
 
-15 documents (+ `dalio` for the pending fifth seat), three per member, assigned per agent by `server/scripts/kb_seed.py`:
+`server/scripts/kb_seed.py` owns the per-agent document set, including Dalio. It uploads research documents from `data/kb/` plus the client files; existing uploads are skipped. From the repository root, with PRISM settings exported in the shell:
+
+```sh
+uv run --project server python server/scripts/kb_seed.py
+```
 
 | agent | research document (public) | client file |
 |---|---|---|
@@ -14,7 +18,7 @@ Project `6deadd60-9c2a-4ee7-bd40-608c187fa024` (Meta Workspace) at https://prism
 | `council.leopold` | *Situational Awareness*, "From GPT-4 to AGI" (excerpt) | same |
 | `council.burry` / `council.cramer` / `council.dalio` | Wikipedia biography (CC BY-SA 4.0) | same |
 
-Sources live in `data/kb/`. In PRISM: Knowledge Base page, filter by agent. The retrieval is in the persona worker (`server/app/services/council.py`, `prism.kb_search`): each v2 trace has a `kb.search` retrieval span whose output is the chunks it pulled, and those chunks are passed to the member as sources. Example: any "Buffett v2 (KB + grounding rule)" trace for "How much did the S&P 500 fall in 2008, and what did Berkshire's book value do that year?" shows the 2008 letter chunk (book value -9.6%, S&P 500 -37.0%) in `kb.search` and the answer quoting it.
+In PRISM: Knowledge Base page, filter by agent. Current retrieval is in `server/app/services/council.py` (`_search` calling `prism.kb_search`), shared by opening lens queries, per-name research and chat questions needing fresh facts. Returned chunks are passed to the specialist as sources. For historical retrieval-span evidence, a "Buffett v2 (KB + grounding rule)" trace for "How much did the S&P 500 fall in 2008, and what did Berkshire's book value do that year?" shows the 2008 letter chunk (book value -9.6%, S&P 500 -37.0%) in `kb.search` and the answer quoting it.
 
 ## 2. Root Cause
 
@@ -60,6 +64,6 @@ Local backup evaluator (`server/scripts/score_grounding.py`, a deterministic ver
 | Leopold | 35/50 = 70% | 47/50 = 94% |
 | **all** | **123/200 = 61.5%** | **183/199 = 92%** |
 
-Reproduce: `cd server && uv run uvicorn app.main:app --env-file ../.env` (set `COUNCIL_VERSION=v1` for v1), `uv run python scripts/seed_runs.py --runs 50`, then `PYTHONPATH=. uv run python scripts/score_grounding.py "Cramer v1 (KB off)" "Cramer v2 (KB + grounding rule)"`.
+Historical reproduction used `cd server && uv run uvicorn app.main:app --env-file ../.env` (set `COUNCIL_VERSION=v1` for v1), `uv run python scripts/seed_runs.py --runs 50`, then `PYTHONPATH=. uv run python scripts/score_grounding.py "Cramer v1 (KB off)" "Cramer v2 (KB + grounding rule)"`. These commands do not reproduce the reported scores on the current council-v0 pipeline: its model selection, prompts and trace inputs differ. See [server settings](../server/README.md#env-names).
 
 Notes: v1 and v2 were produced by running this branch locally against the live PRISM project, v1 with retrieval and the grounding rule switched off, not by calling the deployed Worker. One Burry v2 trace is missing in PRISM (49 of 50 delivered). Older seed batches without the "(KB off)" / "(KB + grounding rule)" suffix, and agent "Buffett v2 (KB on)", are earlier iterations and not part of the comparison.

@@ -2,8 +2,10 @@
 
 Implements the council described in [council/README.md](council/README.md): a neutral coordinator plus five
 specialists (Buffett, Dalio, Burry, Leopold, Cramer), then a routed text chat. With no `NICRRON_API_KEY` it streams deterministic canned
-events, so the frontend can build against it with no keys. Anchor search, Plaid and market data are stubs
-behind `app/services/`; PRISM tracing no-ops without `PRISMTRACE_API_KEY`.
+events, so the frontend can build against it with no keys. Plaid and market data are stubs behind
+`app/services/`; specialist research uses PRISM Knowledge Base retrieval, not the unused Anchor stub.
+Tracing and retrieval no-op without both `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
+See [docs/prism.md](../docs/prism.md) for KB seeding and historical judging evidence.
 
 ## Run
 
@@ -52,11 +54,12 @@ Copy `../.env.example` to `../.env`; the server loads it on startup (shell varia
 
 | name | effect |
 |---|---|
-| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); unset = canned events |
+| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); no key = canned events. An unset model or `nicrron/auto` selects `anthropic/claude-opus-5-5`; other model names are used as given |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR` | `/api/voice/speak`; 503 until the key and that speaker's voice id are set |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
 | `NICRRON_CONCURRENCY` | max Nicrron calls in flight, default 4; 429s are retried with backoff |
-| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM spans: plan, each member, verification failures, ruling, routing, each chat reply |
+| `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | key and project enable PRISM tracing and member-specific KB retrieval; host defaults to `https://prism.blockconvey.com` |
+| `COUNCIL_VERSION` | `v1` disables KB retrieval; default `v2`. Local only, not forwarded by the Worker |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the stubs; unused today |
 
@@ -100,13 +103,13 @@ Chat events: `run.started`; `chat.routed` (`members`, `reason`; `["chair"]` = th
 per speaker `member.reply` (`member`, `text`, `sources`) and its audio triple; `chat.closed` (`text`, `suggestions`);
 `run.done`.
 
-Coordinator rules live in `app/services/coordinator.py` (canned path and guard rails on LLM output):
-numbers must appear in the brief or the member's sources (one retry, then stripped); calls only on held
-names the member researched; `high` on a name needs a quoted source on it; per-name rulings: unanimous 3+
-high, 2 agreeing mid, a lone call capped at mid, a tie is a HOLD "split".
+Payload schemas live in [`app/models.py`](app/models.py); coordinator behavior is described in
+[council/README.md](council/README.md). The frontend's presentation and follow-up controls are documented
+in the [web journey](../web/README.md#journey).
 
 ## Known limits
 
 For storage limits, see [Deploy (Cloudflare)](#deploy-cloudflare). No answer caching or replay yet;
-canned `member.audio` URLs 503 without ElevenLabs keys; sources are the Anchor stub's placeholder;
+canned `member.audio` URLs 503 without ElevenLabs keys; KB sources are empty without configured,
+available member documents (there is no live web-search fallback);
 chat replies arrive whole (no token streaming); `/demo` is a dev page, not the product UI.

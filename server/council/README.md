@@ -1,7 +1,6 @@
 # Council - agentic system design
 
-Status: **server implemented** (`app/services/council.py`, `app/services/coordinator.py`, demo at `/demo`); web app pending. This extends `../../spec.md` from four members to a
-neutral coordinator plus five specialists; the deltas against the spec are listed at the end.
+Status: **server implemented and adapted to the web boardroom**. See the [web journey](../../web/README.md#journey) for presentation and controls, the [server README](../README.md) for operation and API events, and the [product spec](../../data/spec.md) for scope.
 
 ## Scope
 
@@ -22,7 +21,7 @@ The user brings two things:
   separate from it; the other accounts are self-reported balances.
 
 A **coordinator** merges them into one client brief, writes a tailored assignment for each of five
-**specialists**, and runs them in parallel. Each specialist researches the web through its own lens,
+**specialists**, and runs them in parallel. Each specialist queries its PRISM Knowledge Base through its own lens,
 then returns a short analysis, a verdict with a conviction level, and concrete advice. The coordinator
 checks the answers against their sources, delivers a ruling, and then runs the conversation.
 
@@ -64,7 +63,7 @@ Merge both files into one structured brief that every agent receives verbatim:
 - Connected brokerage detail: equity, cash, positions with weight, P/L, sector, beta, role (from portfolio.json).
 - Pre-computed facts, so agents never do arithmetic: top-5 weights, sector mix, portfolio beta, yield,
   winners/losers, biggest drag, brokerage as % of net worth, total cash as % of net worth.
-- Data quality note: brokerage figures are live/connected; other balances are self-reported.
+- Data quality note: the checked-in brokerage snapshot is demo data; other balances are self-reported.
 
 ### 2. Plan (coordinator)
 
@@ -73,7 +72,7 @@ The coordinator reads the brief and writes one **assignment** per specialist:
 - `focus_tickers`: the 2-4 holdings most relevant to that lens (e.g. Leopold gets NVDA, AMD, PLTR, MSFT).
 - `questions`: 2-3 specific questions to answer (e.g. Dalio: "The brokerage is ~94% equities at beta
   1.53 and holds 38% of net worth; how does the whole balance sheet behave in a stagflation regime?").
-- `search_budget`: max queries (default 4) and max sources to cite (default 3).
+- Query counts and source limits are fixed by the orchestration implementation, not assignment fields.
 
 This is what makes it agentic rather than five copies of one prompt: each agent gets a different job.
 
@@ -85,8 +84,10 @@ whole portfolio**; calls are only ever on individual held names, and only after 
 1. **Analyse the portfolio** (no calls). A couple of lens searches from the member's playbook
    (`<member>.md`), then the analysis: headline, 2-4 sentences, 2-3 observations, and the **names** it
    wants to check (2-3 of its own picks, held names only).
-2. **Research each name.** For every name to check: web searches for latest news and for earnings /
-   analyst views / valuation (Anchor; PRISM Knowledge Base later). Sources are tagged with their ticker.
+2. **Research each name.** For every name to check: queries about latest news and earnings /
+   analyst views / valuation retrieve from the member's assigned PRISM Knowledge Base documents.
+   Sources are tagged with their ticker. This does not fetch live web results; missing credentials,
+   retrieval failures or `COUNCIL_VERSION=v1` yield no KB sources. See [PRISM setup](../../docs/prism.md#1-knowledge-base).
    The names are the two biggest holdings (`shared_tickers`, called by every member so the council
    can vote on them) plus the member's own picks, max 5.
 3. **Advise.** The analysis, the per-name research and the brief go in together; out come one
@@ -142,7 +143,7 @@ then merged advice credited to every member), a 3-4 sentence spoken summary, and
 - Events: `member.analysis` (stage 1, as soon as it is ready), `member.source` (with `ticker` for
   per-name research), `member.verdict` (the full object above). Statuses: researching -> analysing ->
   checking names -> deciding.
-- Cards show each call as a coloured badge with a 1-3 pip meter (e.g. `SELL ●●○`).
+- Product presentation, including conviction labels and absent-call states, is documented in the [web journey](../../web/README.md#journey).
 
 ## Conversation (v0: text)
 
@@ -197,36 +198,9 @@ Members may address each other, but the **user and the coordinator run the room*
 
 ### Chat panel
 
-```
-┌──────────────────────────────── chat (right ~30%) ────────────────────────────────┐
-│  ... messages: user turns, member replies (avatar + name + text + sources) ...    │
-│                                                                                   │
-│  Try:  [Burry, why sell PLTR?] [Buffett vs Leopold on NVDA] [My $60k savings?]    │
-│        [Everyone: I retire in 5 years] [Who was most bullish?]  [Roast me]        │
-│  ┌───────────────────────────────────────────────────────────┐  ┌──────────────┐  │
-│  │ Ask the council...   (@ to pick a member)                  │  │ 🎙 Voice (v1)│  │
-│  └───────────────────────────────────────────────────────────┘  └──────────────┘  │
-└───────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Prompt templates** sit as one-tap chips directly above the input, one per routing pattern, so the
-user (and the demo audience) learns what the council can do just by looking:
-
-| Chip | Fills the input with | Routes to |
-|---|---|---|
-| Ask one member | "Burry, why sell PLTR?" | burry |
-| Settle a debate | "Buffett and Leopold disagree on NVDA. Settle it." | buffett, leopold |
-| Use my cash | "What should I do with my $60k of savings?" | coordinator picks |
-| Change the facts | "Everyone: I'm retiring in 5 years. Does that change anything?" | all five |
-| Recap | "Who was most bullish, and who disagreed?" | coordinator |
-| Roast me | "Roast my portfolio." | all five, roast mode for that turn |
-
-- Tapping a chip fills the input instead of sending it, so the user can edit tickers or amounts first.
-- Chips are filled from the brief: the largest position replaces PLTR, the savings balance replaces
-  $60k, the most-disputed ticker replaces NVDA. With no brief yet, the static wording above is shown.
-- After each turn, chips refresh to 2-3 follow-ups from the coordinator's closing line.
-- The templates live in one data file in `web/` so they can be edited without touching components.
-- In v0 the voice switch is shown disabled with a "v1" label, so the layout does not change later.
+The [web journey](../../web/README.md#journey) owns the product chat controls and follow-up-chip behavior.
+The separate `/demo` page has editable template chips and a disabled v1 voice switch; see the
+[server run instructions](../README.md#run).
 
 ## Voice mode (v1: ElevenLabs real-time)
 
@@ -279,32 +253,6 @@ pass through a custom LLM unchanged, and the session-token endpoint.
 | `orchestrator.md` | Coordinator brief: plan, verify, rule, route and pace the chat |
 | `buffett.md`, `dalio.md`, `burry.md`, `leopold.md`, `cramer.md` | One system prompt per specialist: lens, tone tier, voice, research playbook, what to flag |
 | `../../data/PERSONA.md`, `../../data/portfolio.json` | Demo user Jordan Mitchell |
-
-## Changes this implies to `spec.md`
-
-v0:
-
-1. **Coordinator is a separate, neutral agent**, no longer Warren. Warren is one of five equal specialists.
-2. `member` enum gains `dalio`; new voice env `ELEVENLABS_VOICE_DALIO`; five seats plus the
-   coordinator at the head of the table in the 3D scene.
-3. `member.verdict` drops the whole-portfolio `signal`/`confidence`; it carries the analysis, `names`,
-   per-name `positions[]` (signal + conviction low/mid/high) and `advice[]`. New `member.analysis` event.
-   `chair.summary` drops `overall_signal`; adds per-name `positions[]` rulings and `actions[]`.
-4. New event `orchestrator.plan` (`member`, `focus_tickers`, `questions`) so the UI can show the
-   hand-out before research starts.
-5. Ingest accepts the `portfolio.json` shape (`symbol`/`qty`/`avg_entry_price`) alongside the current
-   `ticker`/`shares`/`cost_basis` CSV, and treats it as one account within the persona's net worth.
-6. `POST /api/council/ask` (one named member) generalises to `POST /api/council/chat`
-   `{run_id, text, to?: member[]}`: `to` empty means the coordinator routes. Same SSE stream, plus
-   `chat.routed` (`members[]`, `reason`), `member.reply` (`member`, `text`, `sources`) and
-   `chat.closed` (`text`, `suggestions[]`). (Built: replies arrive whole, not token-streamed.)
-7. The run keeps session memory (chat history, updated brief) keyed by `run_id`.
-8. Demo user changes from Alex to Jordan Mitchell.
-
-v1:
-
-9. `POST /api/voice/session` and `POST /v1/chat/completions` (custom LLM for the ElevenLabs agent),
-   env `ELEVENLABS_AGENT_ID`, and a publicly reachable server URL.
 
 ## Decisions log
 

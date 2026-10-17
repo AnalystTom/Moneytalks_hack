@@ -4,37 +4,25 @@ MONEY TALKS 2 hackathon, Money Intelligence track. Submission: Saturday 2026-10-
 
 ## Pitch
 
-You sit at the head of a boardroom table. A council of legendary investors - Warren Buffett, Jim Cramer, Michael Burry, Leopold Aschenbrenner - reads your portfolio, bank account and profile, researches live, and each gives you a cited Buy / Hold / Sell verdict.
+You sit at the head of a boardroom table. A neutral coordinator assigns research to five parody specialists - Warren Buffett, Ray Dalio, Michael Burry, Leopold Aschenbrenner and Jim Cramer - who return portfolio analysis and per-ticker Buy / Hold / Sell calls with conviction labels. The coordinator rules on those calls and routes follow-up chat. See the [council design](../server/council/README.md) for the pipeline and the [server limits](../server/README.md#known-limits) for research availability.
 
 ICP: retail investors managing their own money.
 Not financial advice: the UI shows a persistent "parody personas, not financial advice" notice.
 
 ## User journey (v0, ~2 min demo)
 
-1. **User input (one step).** One screen collects all three sources, then one "Convene the council" button:
-   - Stock portfolio: holdings upload (CSV or JSON: ticker, shares, cost basis).
-   - Bank account: Plaid Sandbox connection.
-   - `persona.md`: the user's own profile (age, goals, horizon, risk tolerance, constraints).
-   - Demo shortcut: "Load Alex" prefills all three (portfolio $10,000 in an S&P 500 ETF, down 30%; Plaid sandbox account; Alex's `persona.md`).
-   - Alex asks: "I'm down 30%. Keep dollar-cost averaging, sell, or move somewhere else?"
-2. **Ingest.** The server merges the three sources into one client brief and shows a one-line summary in chat ("$10k in VOO, -30%; $4.2k cash; 10-year horizon, moderate risk").
-3. **Council researches.** All four members research in parallel; each speech bubble shows the member's current status, or a count of available sources when no status has arrived. Select a member to view source links in expanded details.
-4. **Verdicts.** Members reveal one by one: signal, confidence, headline, 2-3 reasons, cited sources.
-   - Buffett - fundamentals
-   - Cramer - trend following
-   - Burry - contrarian / bear case
-   - Leopold - AI thesis
-5. **Drum roll.** Before the final call, a drum-roll beat builds tension.
-6. **Warren's ruling.** Warren is the orchestrator at the head of the table: he hands out the research, then gives the final summary - consensus, dissent, overall call.
-7. **Follow-up.** The user asks one named member a question in chat; only that member answers.
+The implemented input, boardroom, ruling and follow-up flow is maintained in the
+[web journey](../web/README.md#journey). The checked-in demo context is Jordan Mitchell's
+`data/portfolio.json` and `data/PERSONA.md`; it is not a live connected account.
+The separate [server demo](../server/README.md#run) also supports an opening run and routed chat.
 
 **Roast mode** (toggle): the council roasts the user's portfolio instead of advising politely - same flow, comedic voice.
 
-Answers are cached per input + question so the stage demo survives a bad network; the cached replay emits the same events as a live run.
+Answer caching and replay are not implemented; see [storage limits](../server/README.md#deploy-cloudflare).
 
 ## Screen
 
-- Left ~70%: HTML/CSS boardroom with a curved table and separate generated cartoon portrait cutouts. Warren (orchestrator) sits at the head; Leopold on the left; Burry and Cramer on the right. All four speech bubbles stay in the layout, grow with their returned headlines (Warren’s returned summary for the final ruling), and are never line-clamped. The active member’s bubble is highlighted. BUY and SELL use thumbs-up/down icons, HOLD uses a pause icon, and pending members show an hourglass. "View more" expands the displayed answer; see the [web journey](../web/README.md#journey) for detail selection and follow-up behavior. No WebGL is required.
+- Left ~70%: HTML/CSS boardroom with a curved table and separate generated cartoon portrait cutouts. The active member's bubble is highlighted. BUY and SELL use thumbs-up/down icons, HOLD uses a pause icon, and pending members show an hourglass. Bubble previews and detail selection follow the [web journey](../web/README.md#journey). No WebGL is required.
 - Right ~30%: React chat panel - the input step, ingest summary, chair summary, follow-ups.
 - Narrow screens: two columns of members, with Warren first, and the chat panel below the boardroom. The main content scrolls vertically for long answers while the parody notice remains visible in the footer.
 - Design direction: stone-grey / charcoal neutral palette and flat cut-paper cartoon members.
@@ -43,25 +31,10 @@ Answers are cached per input + question so the stage demo survives a bad network
 
 The scene and chat only render events; they never call models.
 
-- `POST /api/ingest` - multipart: portfolio file, Plaid sandbox flag, `persona.md` -> `{brief_id, summary}`.
-- `POST /api/council/run` - `{brief_id, question}` -> Server-Sent Events stream.
-- `POST /api/council/ask` - `{run_id, member, question}` -> same stream shape, one member only.
-- `POST /api/voice/speak` - `{member, text}` -> `audio/mpeg`, spoken in that member's ElevenLabs voice (voice ids per member from env).
-- `run` and `ask` accept `roast: bool`.
-
-Events (`event:` name, JSON `data:`):
-
-| event                    | data                                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run.started`            | `run_id`                                                                                                                                   |
-| `member.status`          | `member`, `status`: `researching` / `thinking` / `speaking` / `done`                                                                       |
-| `member.source`          | `member`, `title`, `url`                                                                                                                   |
-| `member.verdict`         | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]` |
-| `chair.summary`          | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren)                                                                   |
-| `member.audio`           | `member`, `audio_url` (ElevenLabs speech for that member's line)                                                                           |
-| `run.done` / `run.error` | `run_id` / `message`                                                                                                                       |
-
-`member` is one of `buffett`, `cramer`, `burry`, `leopold`.
+The authoritative endpoint and SSE sequence documentation is in
+[server/README.md](../server/README.md#endpoints); request and payload schemas are defined in
+[`server/app/models.py`](../server/app/models.py). Presentation mapping belongs to the
+[web journey](../web/README.md#journey).
 
 ## Council members
 
@@ -72,13 +45,13 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 - Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 planned for briefs, runs and cached events. See [deployment](../server/README.md#deploy-cloudflare) for current storage limits. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
 - Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
-- Web search: Anchor.
+- Research: per-member PRISM Knowledge Base retrieval; live web search is not connected.
 - Voice: ElevenLabs text-to-speech, one cloned voice per member (`ELEVENLABS_VOICE_<MEMBER>`).
 - Bank data: Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0).
 - Market data: TBD (current prices for holdings).
 - Financial-analysis skills: built by KJ; members call them through one shared tool interface (stubbed until KJ's piece lands).
 - PRISM (plain HTTP; the `prismtrace-sdk` Python package does not run inside Workers):
-  - Traces: `POST https://prism.blockconvey.com/api/traces`, header `X-PRISMtrace-Key`, session id = council `run_id`, one span per member and per tool call.
+  - Traces and historical judging evidence: see [docs/prism.md](../docs/prism.md).
   - Knowledge Base: each member is a PRISM agent with its own documents; retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
   - `server/scripts/seed_runs.py` runs 50+ council runs over varied inputs so PRISM has data before any fixing.
 

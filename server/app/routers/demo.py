@@ -1,4 +1,4 @@
-"""Server-only demo page (GET /demo) for trying the council before the web app catches up."""
+"""Server-only demo page (GET /demo), separate from the product web app."""
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
