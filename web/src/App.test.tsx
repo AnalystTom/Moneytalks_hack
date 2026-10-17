@@ -256,9 +256,8 @@ it.each([
     const { streamCouncil: requestCouncil } =
       await vi.importActual<typeof import("./contract")>("./contract");
     vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
-    // A lost brief is re-ingested and retried once, so the retry must fail too.
-    if (!follow)
-      vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
+    // A lost brief is re-ingested and retried once, and a lost session reruns as a fresh one: the retry must fail too.
+    vi.mocked(streamCouncil).mockImplementationOnce(requestCouncil);
     vi.mocked(fetch).mockImplementation(async (input, options) => {
       if (input === "/api/council/run" || input === "/api/council/chat")
         return streamed
@@ -521,9 +520,9 @@ it.each([
         `${uploaded.name} loaded`,
       );
     }
-    vi.mocked(streamCouncil).mockRejectedValueOnce(
-      new Error(follow ? "unknown run_id" : "unknown brief_id"),
-    );
+    const lost = new Error(follow ? "unknown run_id" : "unknown brief_id");
+    vi.mocked(streamCouncil).mockRejectedValueOnce(lost);
+    if (follow) vi.mocked(streamCouncil).mockRejectedValueOnce(lost);
     submit("chat-form");
     await vi.advanceTimersByTimeAsync(0);
     expect(get("className", "context-chip").children).toBe(
@@ -553,6 +552,24 @@ it.each([
   },
 );
 
+it("answers a follow-up as a fresh session when the server lost the run", async () => {
+  vi.useFakeTimers();
+  await replySession();
+  vi.mocked(streamCouncil).mockRejectedValueOnce(new Error("unknown run_id"));
+  submit("chat-form");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(streamCouncil).toHaveBeenLastCalledWith(
+    "/api/council/run",
+    { brief_id: "brief", question: "Why hold?", roast: false },
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+  expect(() => get("className", "error")).toThrow("Missing");
+  expect(get("className", "context-chip").children).toBe(
+    "Jordan’s portfolio loaded",
+  );
+});
+
 describe("spoken answers", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -578,7 +595,7 @@ describe("spoken answers", () => {
     return player;
   }
 
-  function spokenStream() {
+  function spokenStream(hang = false) {
     vi.mocked(streamCouncil).mockImplementationOnce(
       async (_, __, signal, receive) => {
         await receive({ event: "run.started", data: { run_id: "parent" } });
@@ -587,6 +604,11 @@ describe("spoken answers", () => {
           data: { member: "buffett", audio_url: "/api/voice/speak" },
         });
         signal.throwIfAborted();
+        // A still-running stream is what makes the cancel button show.
+        if (hang)
+          await new Promise<void>((_, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason)),
+          );
         await receive({ event: "run.done", data: { run_id: "parent" } });
       },
     );
@@ -644,6 +666,47 @@ describe("spoken answers", () => {
     },
   );
 
+  it("lets a new question through while answers are still read aloud", async () => {
+    const player = audioPlayer();
+    vi.mocked(streamCouncil).mockImplementationOnce(
+      async (_, __, ___, receive) => {
+        await receive({ event: "run.started", data: { run_id: "parent" } });
+        for (const member of ["leopold", "buffett"] as const)
+          await receive({
+            event: "member.audio",
+            data: { member, audio_url: `/api/voice/speak?member=${member}` },
+          });
+        await receive({ event: "run.done", data: { run_id: "parent" } });
+      },
+    );
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.play).toHaveBeenCalledOnce();
+    expect(player.src).toContain("leopold");
+    get("id", "message").onChange!({
+      target: { value: "@burry why are you bearish on PLTR?" },
+    });
+    expect(get("id", "message").disabled).toBe(false);
+    expect(get("aria-label", "Send message").disabled).toBe(false);
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streamCouncil).toHaveBeenLastCalledWith(
+      "/api/council/chat",
+      {
+        run_id: "parent",
+        text: "@burry why are you bearish on PLTR?",
+        to: [],
+        roast: false,
+      },
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(player.pause).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(player.play).toHaveBeenCalledOnce(); // the queued buffett line was dropped
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each([false, true])(
     "reports and releases audio with no progress (started: %s)",
     async (started) => {
@@ -678,7 +741,7 @@ describe("spoken answers", () => {
       const player = audioPlayer();
       if (reason === "autoplay rejection")
         player.play.mockRejectedValue(new Error("Not allowed"));
-      spokenStream();
+      spokenStream(reason === "cancel");
       submit("chat-form");
       await vi.advanceTimersByTimeAsync(0);
       if (reason === "error") player.onerror!();
@@ -799,6 +862,10 @@ describe("spoken answers", () => {
             });
             signal.throwIfAborted();
           }
+          if (reason === "cancel")
+            await new Promise<void>((_, reject) =>
+              signal.addEventListener("abort", () => reject(signal.reason)),
+            );
           await receive({ event: "run.done", data: { run_id: "parent" } });
         },
       );

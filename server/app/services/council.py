@@ -10,11 +10,11 @@ from urllib.parse import urlencode
 
 from app.config import CHAIR, COUNCIL_DIR, MEMBERS, council_version
 from app.models import Advice, Analysis, Assignment, Chair, PositionCall, Source, Verdict
-from app.services import coordinator, llm, prism
+from app.services import coordinator, llm, prism, store
 
 log = logging.getLogger(__name__)
 
-RUNS: dict[str, dict] = {}  # run_id -> brief, assignments, verdicts, chair, history; in-memory, see ingest.BRIEFS
+RUNS: dict[str, dict] = {}  # run_id -> brief, assignments, verdicts, chair, history; cache in front of the durable store
 LENS_QUERIES, NAME_QUERIES, MAX_NAMES, HISTORY_TURNS = 2, 2, 5, 12
 QUERIES = {  # stage 1 research playbooks from council/<member>.md, filled with the assignment's focus tickers
     "buffett": ["{0} annual results free cash flow", "{0} valuation vs 10-year average", "{0} competitive moat threats news"],
@@ -310,6 +310,34 @@ async def _stream(body, run_id: str) -> AsyncIterator[str]:
         task.cancel()
 
 
+def _dump(run: dict) -> dict:
+    models = lambda d: {k: v.model_dump() for k, v in d.items()}  # noqa: E731
+    return {**run, "assignments": models(run["assignments"]), "verdicts": models(run["verdicts"]),
+            "sources": {m: [s.model_dump() for s in ss] for m, ss in run["sources"].items()},
+            "chair": run["chair"] and run["chair"].model_dump()}
+
+
+def _load(doc: dict) -> dict:
+    models = lambda cls, d: {k: cls(**v) for k, v in d.items()}  # noqa: E731
+    return {**doc, "assignments": models(Assignment, doc["assignments"]), "verdicts": models(Verdict, doc["verdicts"]),
+            "sources": {m: [Source(**s) for s in ss] for m, ss in doc["sources"].items()},
+            "chair": doc["chair"] and Chair(**doc["chair"])}
+
+
+async def save_run(run_id: str) -> None:
+    """Persist a run after the opening and after each chat turn so a restarted server can still answer follow-ups."""
+    try:
+        await store.save("run", run_id, _dump(RUNS[run_id]))
+    except Exception:  # the live stream is unaffected; only a later follow-up after a restart would miss the run
+        log.exception("could not persist run %s", run_id)
+
+
+async def get_run(run_id: str) -> dict | None:
+    if run_id not in RUNS and (doc := await store.load("run", run_id)):
+        RUNS[run_id] = _load(doc)
+    return RUNS.get(run_id)
+
+
 def start_run(brief: dict, question: str, roast: bool) -> tuple[str, AsyncIterator[str]]:
     run_id = uuid.uuid4().hex
     run = RUNS[run_id] = {"brief": brief, "question": question, "roast": roast, "assignments": {}, "verdicts": {},
@@ -329,6 +357,7 @@ def start_run(brief: dict, question: str, roast: bool) -> tuple[str, AsyncIterat
         await _speak(CHAIR, chair.summary, emit)
         run["history"] += [{"role": m, "text": _line(v)} for m, v in verdicts.items()]
         run["history"].append({"role": CHAIR, "text": chair.summary})
+        await save_run(run_id)
 
     return run_id, _stream(body, run_id)
 
@@ -459,6 +488,7 @@ def chat(run: dict, run_id: str, text: str, to: list[str], roast: bool) -> Async
         close = await _close(run_id, run, text, said, reason)
         if close["text"]:
             run["history"].append({"role": CHAIR, "text": close["text"]})
+        await save_run(run_id)
         await emit("chat.closed", close)
 
     return _stream(body, run_id)
