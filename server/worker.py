@@ -8,12 +8,10 @@ import os
 import asgi
 from workers import DurableObject, WorkerEntrypoint
 
-from app.main import app
-
 # Names app.config reads; keep in sync with ../.env.example.
 ENV_NAMES = (
     "CORS_ORIGINS", "NICRRON_API_KEY", "NICRRON_MODEL", "PRISMTRACE_API_KEY", "PRISMTRACE_PROJECT_ID",
-    "PRISMTRACE_ORG_ID", "PRISMTRACE_HOST", "ELEVENLABS_API_KEY", "ANCHOR_API_KEY", "PLAID_CLIENT_ID", "PLAID_SECRET",
+    "PRISMTRACE_ORG_ID", "PRISMTRACE_HOST", "ELEVENLABS_API_KEY", "ELEVENLABS_MODEL", "ANCHOR_API_KEY", "PLAID_CLIENT_ID", "PLAID_SECRET",
     *(f"ELEVENLABS_VOICE_{m}" for m in ("BUFFETT", "CRAMER", "BURRY", "LEOPOLD")),
 )
 
@@ -25,6 +23,8 @@ class Council(DurableObject):
             value = getattr(self.env, key, None)
             if isinstance(value, str):
                 os.environ[key] = value
+        from app.main import app
+
         return await asgi.fetch(app, request.js_object, self.env)
 
 
