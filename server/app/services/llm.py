@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 
@@ -15,14 +16,19 @@ def enabled() -> bool:
 async def complete_json(system: str, user: str) -> dict:
     """One Nicrron (OpenAI-compatible) chat completion whose reply must be a JSON object."""
     async with httpx.AsyncClient(timeout=90) as client:
-        r = await client.post(
-            f"{BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {env('NICRRON_API_KEY')}"},
-            json={
-                "model": env("NICRRON_MODEL", "nicrron/auto"),
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            },
-        )
+        for attempt in range(4):
+            r = await client.post(
+                f"{BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {env('NICRRON_API_KEY')}"},
+                json={
+                    "model": env("NICRRON_MODEL", "nicrron/auto"),
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    "max_tokens": 1500,  # bounds spend per call; a verdict JSON fits well inside it
+                },
+            )
+            if r.status_code != 429:
+                break
+            await asyncio.sleep(2**attempt * 3)  # rate limited: back off 3s, 6s, 12s, 24s
     r.raise_for_status()
     text = r.json()["choices"][0]["message"]["content"]
     match = re.search(r"\{.*\}", text, re.DOTALL)  # models sometimes wrap JSON in prose or fences
