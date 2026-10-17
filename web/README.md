@@ -1,6 +1,6 @@
 # Council web
 
-React + Vite + TypeScript. See the [screen design](../data/spec.md#screen) for the boardroom layout and visual direction. Palette and typography are CSS variables in `src/style.css`.
+React + Vite + TypeScript with an HTML/CSS boardroom. Palette and typography are CSS variables in `src/style.css`.
 
 ## Run
 
@@ -24,15 +24,17 @@ Open the Vite URL (normally `http://127.0.0.1:5173`). `/api` proxies to FastAPI 
 
 ## Journey
 
-Upload CSV/JSON holdings (`ticker`, `shares`, `cost_basis` per share), optionally request the Plaid sandbox, and upload or write a persona profile. Holdings JSON can be an array or an object with a `holdings` array; broker JSON with a `positions` array is also accepted and normalized before submission. Ask a question and convene the council. The UI consumes POST SSE, reveals each verdict, stages a drum roll, shows Warren's ruling, and supports named-member follow-ups and roast mode. A failed or cancelled follow-up preserves the completed council session so you can ask again.
+The app loads `data/portfolio.json` and `data/PERSONA.md` automatically through Vite development endpoints or emitted build assets, normalizes broker positions, and ingests them with the existing API. The portfolio chip shows loading, unavailable or accepted context. The paperclip replaces CSV/JSON holdings while retaining the profile, then clears the previous conversation only after the replacement is accepted. Context failures show an explicit error; Retry is available when no accepted context remains.
 
-Select a speech bubble, portrait, seat label or member in the strip to expand the displayed answer. While Warren’s bubble shows his final ruling, its details show the ruling’s overall signal, summary, consensus and dissent. Each member’s latest follow-up replaces their displayed answer and strip signal; a follow-up from Warren replaces his ruling on the board. The transcript retains the original verdicts, ruling and follow-ups.
+Send a message to run the council. Returned verdicts and Warren's ruling appear as avatar messages. Reply to a returned member message for a named-member follow-up; clear the recipient to ask the full council again. Failed or cancelled messages stay in the composer for retry. Roast mode is available in the header.
 
-Voice plays sequentially when `/api/voice/speak` is configured. Each clip can finish naturally; 30 seconds without playback progress reports a timeout and advances the stream. Playback errors are explicit. Pausing a clip or disabling sound releases the stream to continue; cancelling the session stops playback and the request.
+Five cartoon members sit around the curved table. The current server supports four; Ray's seat stays empty until a real verdict arrives. No Ray opinion, confidence or source is supplied by the frontend. Stream events select idle, research, reveal, speaking and drum-roll poses. CSS transforms provide cutout motion and respect `prefers-reduced-motion`.
 
-**Load demo** reads `data/portfolio.json` through a Vite development endpoint or emitted build asset. As with uploaded broker JSON, position `symbol`, `qty` and `avg_entry_price` become `ticker`, `shares` and `cost_basis`; snapshot market prices and account balances are not submitted. The profile is loaded verbatim from `data/PERSONA.md`; the question follows the journey in `data/spec.md`. This is explicitly labelled synthetic demo data. Sandbox is a request to the server, never a claim that a real bank is connected.
+Bubbles preview the server's `speech_bubble` field when returned, otherwise the verdict headline or Warren's summary. Either input is shortened to its first sentence, capped at fifteen words and 100 characters before any added ellipsis. Select a bubble, portrait or nameplate to view the full answer, reasons and valid sources. Warren's final details include his overall signal, summary, consensus and dissent. Chat history retains earlier returned answers.
 
-The existing server returns canned verdicts without a model key, stub market/bank data and placeholder research links. The preview notice stays visible and example-domain source URLs are shown as unavailable. The frontend never supplies financial verdicts, confidence, citations or balances itself. It cannot certify the backend's research as live. There is no client-side answer cache; retrying after a backend restart requires a new brief.
+Voice is loaded only when `/api/health` explicitly reports `voice: true` and sound is enabled. Actual playback starts and stops the speaking pose; text-only runs use a short speaking beat. Playback failures disable further audio loads for that run. A clip with no playback progress for 30 seconds releases the stream. Pausing or cancelling releases playback.
+
+The checked-in context is demo data, not a connected bank account. The frontend never supplies financial verdicts, confidence, citations or balances itself and cannot certify the backend's research. Example-domain source URLs are excluded. See [deployment](../server/README.md#deploy-cloudflare) for backend storage limits. If context expires, Retry re-ingests the last accepted holdings and profile kept in this tab's memory; rejected replacements do not overwrite the accepted holdings. Refreshing clears the conversation and reloads the checked-in demo context.
 
 ## Checks
 
@@ -48,19 +50,18 @@ GitHub Actions runs these checks plus the existing backend tests. The backend cu
 
 ## Portrait asset
 
-Four separate transparent cutouts in `public/portraits/` replace the old portrait atlas. Each was generated with Codex’s built-in image generation tool and visually inspected for a consistent cut-paper cartoon style. Files: `buffett.png`, `leopold.png`, `burry.png`, `cramer.png`.
+Five separate transparent cutouts in `public/portraits/` replace the old portrait atlas. Each was generated with Codex’s built-in image generation tool and visually inspected for a consistent cut-paper cartoon style. Files: `buffett.png`, `leopold.png`, `burry.png`, `cramer.png`, `dalio.png`.
 
 Shared prompt: “Use case: illustration-story. Individual transparent waist-up character cutout for Council parody app. Flat South Park-style cut-paper cartoon, bold black outlines, simple round head, small black dot pupils, same coherent set design, no gradients or 3D. Front view seated pose, both shoulders and waist entirely visible, neutral hands at lower edge. Transparent background. Muted charcoal clothing, warm light skin. No text, logos, props, scenery, table, chair or other characters.”
 
 Individual subjects:
 
 - Warren Buffett: elderly white swept hair, round black glasses, charcoal suit, white shirt, dusty mauve tie, calm expression.
-- Leopold Aschenbrenner: voluminous wavy brown hair, round black glasses, black suit, white shirt, black tie, curious expression.
+- Leopold Aschenbrenner: regenerated against the supplied identity photograph; slim young man, light-brown swept-back side-parted hair, blue-grey eyes, no glasses, black ribbed mock-neck sweater.
 - Michael Burry: side-swept black hair, no glasses, charcoal jacket, muted light-blue shirt, serious expression.
+- Ray Dalio: receding swept-back grey hair, long face, no glasses, charcoal blazer and light-blue open-collar shirt.
 - Jim Cramer: bald with dark temple hair, dark goatee, white rolled-sleeve shirt, dusty mauve tie, expressive eyebrows.
 
 ## Review environment
 
 Run browser testing on `big-machine-1` with an isolated profile. Never launch local review windows. Capture screenshots and a short working-flow video from the built UI before publishing a UI PR, then close only the processes created for that run. Remote verification results are recorded with the task evidence outside this worktree.
-
-For this restyle, big-machine-1 was reported unreachable by the dispatch brief. No local browser or app was launched. Automated checks do not prove visual layout; built-app screenshots, video and fresh-user Playwright verification remain unavailable and must be stated in the PR.

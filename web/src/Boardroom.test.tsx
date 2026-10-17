@@ -36,7 +36,7 @@ const verdict = (
 });
 
 describe("cartoon boardroom", () => {
-  it("renders all four empty seats with pending icons and the generated assets", () => {
+  it("renders all five empty seats with pending icons and the generated assets", () => {
     const html = renderToStaticMarkup(
       <Boardroom
         statuses={{}}
@@ -45,9 +45,9 @@ describe("cartoon boardroom", () => {
         onSelect={() => {}}
       />,
     );
-    expect(html.match(/class="speech-bubble"/g)).toHaveLength(4);
-    expect(html.match(/aria-label="Pending"/g)).toHaveLength(4);
-    expect(html.match(/No verdict yet\./g)).toHaveLength(8);
+    expect(html.match(/class="speech-bubble"/g)).toHaveLength(5);
+    expect(html.match(/aria-label="Pending"/g)).toHaveLength(5);
+    expect(html.match(/No verdict yet\./g)).toHaveLength(10);
     for (const member of Object.keys(members)) {
       expect(html).toContain(`/portraits/${member}.png`);
       const asset = new URL(
@@ -63,11 +63,11 @@ describe("cartoon boardroom", () => {
       html.indexOf("council-seat buffett"),
     );
     expect(html.indexOf("council-seat buffett")).toBeLessThan(
-      html.indexOf("council-seat burry"),
+      html.indexOf("council-seat dalio"),
     );
   });
 
-  it("keeps every long streamed line intact and opens the matching member details", () => {
+  it("shortens long streamed lines and opens the matching member details", () => {
     const onSelect = vi.fn();
     const longLine =
       "A long returned line with risk and allocation context. ".repeat(40);
@@ -84,7 +84,10 @@ describe("cartoon boardroom", () => {
       },
     });
     const html = renderToStaticMarkup(tree);
-    expect(html.split(`<strong>${longLine}</strong>`)).toHaveLength(5);
+    expect(html).not.toContain(longLine);
+    expect(
+      html.match(/A long returned line with risk and allocation context\./g),
+    ).toHaveLength(8);
     for (const signal of ["BUY", "HOLD", "SELL"])
       expect(html).toContain(`aria-label="${signal}"`);
     const bubbles = buttons(tree).filter(
@@ -93,8 +96,9 @@ describe("cartoon boardroom", () => {
     bubbles.forEach((bubble) => bubble.onClick!());
     expect(onSelect.mock.calls.flat()).toEqual([
       "leopold",
-      "buffett",
       "burry",
+      "buffett",
+      "dalio",
       "cramer",
     ]);
   });
@@ -122,7 +126,7 @@ describe("cartoon boardroom", () => {
     expect(html).toContain("researching");
     expect(html).toContain("Reviewing 1 source…");
     expect(html).toContain("Returned final summary");
-    expect(html).toContain("The chair’s final word");
+    expect(html).toContain("Final word");
     expect(html).not.toContain("Earlier verdict");
   });
 });
