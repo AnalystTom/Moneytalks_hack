@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import re
 
 from pydantic import ValidationError
 
@@ -11,6 +12,7 @@ from app.services.prism import Trace
 
 log = logging.getLogger(__name__)
 MAX_STEPS = 6  # model turns before further tool calls fail, though schemas remain in the request
+NUMBER = re.compile(r"(?:\(\s*)?(?:[+−-]\s*)?(?:[$£€¥]\s*)?(?:[+−-]\s*)?(?:\d+(?:[.,]\d+)*|\.\d+)(?:[eE][+−-]?\d+)?(?:\s*[%‰])?(?:\s*\))?")
 OUTPUT_CONTRACT = (
     "Reply, when your research is done, with only a JSON object: "
     '{"signal":"BUY|HOLD|SELL","confidence":0-1,"headline":"one line","reasons":["2-3 short reasons"],'
@@ -38,9 +40,15 @@ def task_prompt(brief: dict, question: str, roast: bool, assignment: str, earlie
     return "\n".join(parts)
 
 
+def _excerpt(quote: str, text: str) -> bool:
+    inside_numbers = {i for number in NUMBER.finditer(text) for i in range(number.start() + 1, number.end())}
+    return any(match.start() not in inside_numbers and match.start() + len(quote) not in inside_numbers
+               for match in re.finditer(f"(?={re.escape(quote)})", text))
+
+
 def _clean(verdict: Verdict, evidence: list[Source]) -> Verdict:
     verdict.sources = [s for s in verdict.sources if s.quote.strip() and any(
-        s.title == e.title and s.url == e.url and s.quote in e.quote for e in evidence
+        s.title == e.title and s.url == e.url and _excerpt(s.quote, e.quote) for e in evidence
     )]
     if not verdict.sources:
         raise ValueError("A verdict must cite evidence returned by a successful tool call")

@@ -4,6 +4,7 @@ import json
 import httpx
 import pytest
 
+from app.models import Source, Verdict
 from app.services import agents, council, elevenlabs, llm, personas, prism, tools
 from tests.conftest import parse_sse
 
@@ -118,7 +119,6 @@ def test_five_personas_ship(client, brief_id, fake):
 def test_sources_not_returned_by_a_tool_are_dropped(client, brief_id, monkeypatch):
     monkeypatch.setenv("NICRRON_API_KEY", "test")
     monkeypatch.setenv("ANCHOR_API_KEY", "a")
-    from app.models import Source
     from app.services import anchor
 
     async def search(query):
@@ -480,3 +480,67 @@ async def test_worker_receives_and_can_cite_complete_large_tool_results(monkeypa
     monkeypatch.setattr(llm, "chat", chat)
     verdict = await agents.run(personas.load()["burry"], {"summary": "s"}, "q", False, "", prism.Trace("large", "burry", "q"), emit)
     assert [s.model_dump() for s in verdict.sources] == [source]
+
+
+@pytest.mark.parametrize("url", ["", "https://issuer.test/report"])
+@pytest.mark.parametrize("text,quote,accepted", [
+    ("The price is $100.", "The price is $10", False),
+    ("The price is $100.", "The price is $100", True),
+    ("Return: -10.5%.", "10.5%", False),
+    ("Return: +10.5%.", "10.5%", False),
+    ("Return: −10.5%.", "10.5%", False),
+    ("Return: -10.50%.", "-10.5", False),
+    ("Return: -10.50%.", "-10.50", False),
+    ("Return: -10.50%.", "-10.50%", True),
+    ("Balance: 1,000.25", "000.25", False),
+    ("Balance: 1,000.25", "1,000.25", True),
+    ("Fraction: 0.25", ".25", False),
+    ("Fraction: .25", ".25", True),
+    ("Probability: 1e-05", "1", False),
+    ("Probability: 1e-05", "1e-05", True),
+    ("Loss: -$100", "$100", False),
+    ("Loss: $-100", "100", False),
+    ("Return: - 10.5 %", "10.5", False),
+    ("Loss: (10.5%)", "10.5%", False),
+    ("Loss: (10.5%)", "(10.5%)", True),
+    ("$100 then $10.", "$10", True),
+    ("11 1 1", "1 1", True),
+    ("A liquid portfolio.", "liquid portfolio", True),
+])
+def test_citation_excerpts_preserve_complete_numeric_tokens(url, text, quote, accepted):
+    evidence = [Source(title="Report", url=url, quote=text)]
+    verdict = Verdict(**{**VERDICT, "sources": [{"title": "Report", "url": url, "quote": quote}]})
+    if accepted:
+        assert [source.quote for source in agents._clean(verdict, evidence).sources] == [quote]
+    else:
+        with pytest.raises(ValueError, match="must cite evidence"):
+            agents._clean(verdict, evidence)
+
+
+@pytest.mark.parametrize("follow_up", [False, True])
+@pytest.mark.parametrize("web", [False, True])
+def test_numeric_quote_truncation_cannot_publish_a_verdict(client, brief_id, fake, monkeypatch, follow_up, web):
+    if follow_up:
+        run_id = run(client, brief_id)[0][1]["run_id"]
+    name = "web_search" if web else "persona_profile"
+    source = {"title": "Report" if web else name, "url": "https://issuer.test/report" if web else "", "quote": "The price is $100."}
+    fake.verdict = {**VERDICT, "sources": [{**source, "quote": "The price is $10"}]}
+    if web:
+        monkeypatch.setenv("ANCHOR_API_KEY", "test")
+    real = fake.chat
+
+    async def chat(messages, tools=None, max_tokens=4096):
+        if tools and not any(m["role"] == "tool" for m in messages):
+            return fake._result({"role": "assistant", "tool_calls": [
+                {"id": "quote", "type": "function", "function": {"name": name, "arguments": "{}"}},
+            ]})
+        return await real(messages, tools, max_tokens)
+
+    async def call(*args):
+        return {"results": [source]} if web else {"profile": source["quote"]}
+
+    monkeypatch.setattr(llm, "chat", chat)
+    monkeypatch.setattr(tools, "call", call)
+    events = parse_sse(client.post("/api/council/ask", json={"run_id": run_id, "member": "burry", "question": "What was the price?"}).text) if follow_up else run(client, brief_id)
+    assert events[-1][0] == "run.error"
+    assert not any(e in ("member.verdict", "chair.summary", "run.done") for e, _ in events)
