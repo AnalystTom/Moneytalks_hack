@@ -1002,6 +1002,7 @@ footer p {
   }
   .layout {
     grid-template-columns: 1fr;
+    grid-auto-rows: max-content;
     height: auto;
   }
   .stage {
