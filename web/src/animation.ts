@@ -50,18 +50,13 @@ export function animateEvent(
 
 // Shorten returned text only; never compose a new opinion for a member.
 export function bubbleLine(text: string): string {
-  const sentence =
-    text
-      .trim()
-      .replace(/\s+/g, " ")
-      .match(/^.*?[.!?](?=\s|$)|^.+$/)?.[0] || "";
-  const words = sentence.split(" ");
-  const preview = words.slice(0, 15).join(" ");
+  const full = text.trim().replace(/\s+/g, " ");
+  const preview = full.split(" ").slice(0, 40).join(" ");
   const bounded =
-    preview.length > 100
-      ? preview.slice(0, 100).replace(/\s+\S*$/, "")
+    preview.length > 240
+      ? preview.slice(0, 240).replace(/\s+\S*$/, "")
       : preview;
-  return bounded.length < sentence.length
+  return bounded.length < full.length
     ? `${bounded.replace(/[,:;.!?]+$/, "")}…`
-    : sentence;
+    : full;
 }

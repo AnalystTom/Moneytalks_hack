@@ -4,13 +4,21 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   apiError,
+  contextCard,
   ingestPortfolio,
   members,
   portfolioFile,
   sourceUrl,
   streamCouncil,
 } from "./contract";
-import type { Chair, CouncilEvent, Member, Source, Verdict } from "./contract";
+import type {
+  Chair,
+  ContextCard,
+  CouncilEvent,
+  Member,
+  Source,
+  Verdict,
+} from "./contract";
 import VoiceInput from "./VoiceInput";
 const Boardroom = lazy(() => import("./Boardroom"));
 const pause = (ms: number) =>
@@ -142,6 +150,7 @@ function MemberDialog({
 
 export default function App() {
   const [context, setContext] = useState<{ briefId: string; label: string }>();
+  const [contextSummary, setContextSummary] = useState<ContextCard>();
   const [loadingContext, setLoadingContext] = useState(true);
   const [question, setQuestion] = useState("");
   const [roast, setRoast] = useState(false);
@@ -175,9 +184,9 @@ export default function App() {
   const controller = useRef<AbortController | null>(null);
   const contextController = useRef<AbortController | null>(null);
   const persona = useRef("");
-  const acceptedPortfolio = useRef<{ file: File; label: string } | undefined>(
-    undefined,
-  );
+  const acceptedPortfolio = useRef<
+    { file: File; label: string; snapshot?: unknown } | undefined
+  >(undefined);
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioMember = useRef<Member | undefined>(undefined);
   const soundEnabled = useRef(sound);
@@ -215,6 +224,10 @@ export default function App() {
     setError("");
     try {
       let file = replacement ?? acceptedPortfolio.current?.file;
+      let snapshot = acceptedPortfolio.current?.snapshot;
+      if (replacement?.name.toLowerCase().endsWith(".json"))
+        snapshot = JSON.parse(await replacement.text());
+      else if (replacement) snapshot = undefined;
       if (!file || !persona.current) {
         const [portfolioResponse, profileResponse] = await Promise.all([
           fetch("/demo-portfolio.json", { signal }),
@@ -223,7 +236,8 @@ export default function App() {
         if (!portfolioResponse.ok || !profileResponse.ok)
           throw new Error("Portfolio context is unavailable. Please retry.");
         persona.current = await profileResponse.text();
-        file ??= portfolioFile(await portfolioResponse.json());
+        snapshot = await portfolioResponse.json();
+        file ??= portfolioFile(snapshot);
       }
       file = await ingestPortfolio(file);
       const form = new FormData();
@@ -254,7 +268,8 @@ export default function App() {
         ? `${replacement.name} loaded`
         : (acceptedPortfolio.current?.label ??
           (name ? `${name}’s portfolio loaded` : "Portfolio loaded"));
-      acceptedPortfolio.current = { file, label };
+      acceptedPortfolio.current = { file, label, snapshot };
+      setContextSummary(contextCard(snapshot, persona.current));
       setContext({ briefId: brief.brief_id, label });
       setRunId("");
       setRunFinished(false);
@@ -728,6 +743,16 @@ export default function App() {
             aria-label="Council messages"
             aria-live="polite"
           >
+            {contextSummary && (
+              <article className="chat-message context-card">
+                <small>{contextSummary.title}</small>
+                <ul>
+                  {contextSummary.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </article>
+            )}
             {!messages.length && (
               <p className="chat-empty">
                 What would you like the council to consider?
