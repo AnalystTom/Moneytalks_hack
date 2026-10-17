@@ -20,7 +20,7 @@ npm ci
 npm run dev
 ```
 
-Open the Vite URL (normally `http://127.0.0.1:5173`). `/api` proxies to FastAPI on port 8000. No backend change is needed. `npm run build` emits `web/dist`; production hosting must route `/api` to the same backend. `npm run preview` serves the build and inherits the same API proxy; keep FastAPI running.
+Open the Vite URL (normally `http://127.0.0.1:5173`). `/api` proxies to FastAPI on port 8000. No backend change is needed. `npm run build` emits `web/dist`; see [Cloudflare deployment](../server/README.md#deploy-cloudflare) for production hosting. `npm run preview` serves the build and inherits the same API proxy; keep FastAPI running.
 
 ## Journey
 

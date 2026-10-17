@@ -68,7 +68,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 
 ## Stack
 
-- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 (briefs, runs, cached events). If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
+- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 planned for briefs, runs and cached events. See [deployment](../server/README.md#deploy-cloudflare) for current storage limits. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
 - Frontend: React (Vite + TypeScript) + react-three-fiber, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Web search: Anchor.
@@ -81,7 +81,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
   - Knowledge Base: each member is a PRISM agent with its own documents; retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
   - `server/scripts/seed_runs.py` runs 50+ council runs over varied inputs so PRISM has data before any fixing.
 
-Secrets (Worker secrets, names in `.env.example`): `NICRRON_API_KEY`, `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST`, `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT`, `ELEVENLABS_VOICE_CRAMER`, `ELEVENLABS_VOICE_BURRY`, `ELEVENLABS_VOICE_LEOPOLD`.
+For supported settings, see [Env names](../server/README.md#env-names); for Worker secret uploads, see [Deploy (Cloudflare)](../server/README.md#deploy-cloudflare).
 
 ## Repo layout
 
