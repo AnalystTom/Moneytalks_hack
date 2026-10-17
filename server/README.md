@@ -29,6 +29,12 @@ Live at https://council.thomasmann2001.workers.dev. `deploy.sh` is the redeploy;
 `worker.py` copies the names in `ENV_NAMES` from the Worker env into `os.environ`; add new env names there.
 Non-Python data the app reads at runtime (`council/*.md`) is bundled via `rules` in `wrangler.jsonc`.
 
+### D1 database
+
+The Worker has a D1 database `council` (id in `wrangler.jsonc`) bound as `DB`; it is empty for now. The schema and
+the preloaded demo data come in a follow-up. Inside the Durable Object it is `self.env.DB`. Run SQL against the
+live database with `npx wrangler d1 execute council --remote --command "SELECT 1"` (or `--file schema.sql`).
+
 ## Env names
 
 Copy `../.env.example` to `../.env`. All optional.
