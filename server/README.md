@@ -1,4 +1,4 @@
-# server - FastAPI backend (see ../spec.md)
+# server - FastAPI backend (see [spec](../data/spec.md))
 
 Implements the spec's server-to-scene contract. With no `NICRRON_API_KEY` it streams deterministic canned
 events, so the frontend can build against it with no keys. Anchor search, Plaid and market data are stubs
