@@ -17,14 +17,45 @@ uv run pytest
 Demo without the web app: open `http://localhost:8000/demo`, click **Load Jordan**, convene, then chat
 (template chips fill the input; the voice switch is a disabled v1 placeholder).
 
+## Deploy (Cloudflare)
+
+One Worker named `council` serves `web/dist` as static assets and the FastAPI app (Python Workers) under `/api/*`.
+Because briefs and runs live in memory, `worker.py` forwards every `/api` request to a single Durable Object so
+ingest and run hit the same instance; state is lost when that object is evicted or redeployed.
+
+From the repository root, with Node 22 and `uv` on PATH:
+
+```sh
+npx wrangler login          # once
+./set-secrets.sh .env       # uploads nonempty supported settings as Worker secrets
+./deploy.sh                 # builds web/, then runs `pywrangler deploy`
+```
+
+`set-secrets.sh` parses dotenv assignments, including `export`, quotes, inline comments and variable interpolation.
+It rejects malformed assignments before uploading and selects nonempty values with `NICRRON_`, `PRISMTRACE_`,
+`ELEVENLABS_`, `ANCHOR_`, `PLAID_` or `CORS_` prefixes. Omitted or empty values do not delete existing secrets.
+
+Public URL: https://council.thomasmann2001.workers.dev. `deploy.sh` is the redeploy; secrets persist across deploys.
+`worker.py` copies the names in `ENV_NAMES` from the Worker env into `os.environ` before importing the app,
+so settings such as CORS are available during app construction; add new consumed env names there.
+Non-Python data the app reads at runtime (`council/*.md`) is bundled via `rules` in `wrangler.jsonc`.
+
+### D1 database
+
+`wrangler.jsonc` binds the D1 database `council` as `DB`, available inside the Durable Object as `self.env.DB`.
+The app does not use this binding yet; no D1 schema or seed script is included. From `server/`, run SQL against
+the live database with `npx wrangler d1 execute council --remote --command "SELECT 1"`.
+
 ## Env names
 
-Copy `../.env.example` to `../.env`. All optional.
+Copy `../.env.example` to `../.env`; the server loads it on startup (shell variables win). All optional.
 
 | name | effect |
 |---|---|
 | `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); unset = canned events |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR` | `/api/voice/speak`; 503 until the key and that speaker's voice id are set |
+| `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
+| `NICRRON_CONCURRENCY` | max Nicrron calls in flight, default 4; 429s are retried with backoff |
 | `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM spans: plan, each member, verification failures, ruling, routing, each chat reply |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the stubs; unused today |
@@ -76,6 +107,6 @@ high, 2 agreeing mid, a lone call capped at mid, a tie is a HOLD "split".
 
 ## Known limits
 
-Briefs and runs live in memory (lost on restart); no answer caching or replay yet (spec says D1);
+For storage limits, see [Deploy (Cloudflare)](#deploy-cloudflare). No answer caching or replay yet;
 canned `member.audio` URLs 503 without ElevenLabs keys; sources are the Anchor stub's placeholder;
 chat replies arrive whole (no token streaming); `/demo` is a dev page, not the product UI.

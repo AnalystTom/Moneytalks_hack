@@ -18,7 +18,7 @@ Not financial advice: the UI shows a persistent "parody personas, not financial 
    - Demo shortcut: "Load Alex" prefills all three (portfolio $10,000 in an S&P 500 ETF, down 30%; Plaid sandbox account; Alex's `persona.md`).
    - Alex asks: "I'm down 30%. Keep dollar-cost averaging, sell, or move somewhere else?"
 2. **Ingest.** The server merges the three sources into one client brief and shows a one-line summary in chat ("$10k in VOO, -30%; $4.2k cash; 10-year horizon, moderate risk").
-3. **Council researches.** All four members research in parallel; each seat shows its live searches and sources.
+3. **Council researches.** All four members research in parallel; each speech bubble shows the member's current status, or a count of available sources when no status has arrived. Select a member to view source links in expanded details.
 4. **Verdicts.** Members reveal one by one: signal, confidence, headline, 2-3 reasons, cited sources.
    - Buffett - fundamentals
    - Cramer - trend following
@@ -34,9 +34,10 @@ Answers are cached per input + question so the stage demo survives a bad network
 
 ## Screen
 
-- Left ~70%: three.js scene (react-three-fiber). First-person camera at the user's end of a boardroom table. Warren (orchestrator) sits at the far head; Leopold on the left; Cramer and Burry on the right. Members are stylised, comical generated portraits (2D billboards in the 3D scene). The speaking member is spotlit; their verdict card lands on the table in front of them with a "view more" control that expands reasons and sources.
+- Left ~70%: HTML/CSS boardroom with a curved table and separate generated cartoon portrait cutouts. Warren (orchestrator) sits at the head; Leopold on the left; Burry and Cramer on the right. All four speech bubbles stay in the layout, grow with their returned headlines (Warren’s returned summary for the final ruling), and are never line-clamped. The active member’s bubble is highlighted. BUY and SELL use thumbs-up/down icons, HOLD uses a pause icon, and pending members show an hourglass. "View more" expands the displayed answer; see the [web journey](../web/README.md#journey) for detail selection and follow-up behavior. No WebGL is required.
 - Right ~30%: React chat panel - the input step, ingest summary, chair summary, follow-ups.
-- Design direction: high-stakes financial council, boardroom drama.
+- Narrow screens: two columns of members, with Warren first, and the chat panel below the boardroom. The main content scrolls vertically for long answers while the parody notice remains visible in the footer.
+- Design direction: stone-grey / charcoal neutral palette and flat cut-paper cartoon members.
 
 ## Server-to-scene contract
 
@@ -50,26 +51,26 @@ The scene and chat only render events; they never call models.
 
 Events (`event:` name, JSON `data:`):
 
-| event | data |
-|---|---|
-| `run.started` | `run_id` |
-| `member.status` | `member`, `status`: `researching` / `thinking` / `speaking` / `done` |
-| `member.source` | `member`, `title`, `url` |
-| `member.verdict` | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]` |
-| `chair.summary` | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren) |
-| `member.audio` | `member`, `audio_url` (ElevenLabs speech for that member's line) |
-| `run.done` / `run.error` | `run_id` / `message` |
+| event                    | data                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run.started`            | `run_id`                                                                                                                                   |
+| `member.status`          | `member`, `status`: `researching` / `thinking` / `speaking` / `done`                                                                       |
+| `member.source`          | `member`, `title`, `url`                                                                                                                   |
+| `member.verdict`         | `member`, `signal`: `BUY` / `HOLD` / `SELL`, `confidence` 0-1, `headline`, `reasons[]`, `sources[]` (`title`, `url`, `quote`), `tickers[]` |
+| `chair.summary`          | `overall_signal`, `consensus`, `dissent[]`, `summary` (spoken by Warren)                                                                   |
+| `member.audio`           | `member`, `audio_url` (ElevenLabs speech for that member's line)                                                                           |
+| `run.done` / `run.error` | `run_id` / `message`                                                                                                                       |
 
 `member` is one of `buffett`, `cramer`, `burry`, `leopold`.
 
 ## Council members
 
-One file per member in `server/council/<member>.md`: philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, *Situational Awareness* for Leopold).
+One file per member in `server/council/<member>.md`: philosophy, voice, signature phrases, what they research, and the documents in their PRISM Knowledge Base (e.g. Berkshire letters for Buffett, _Situational Awareness_ for Leopold).
 
 ## Stack
 
-- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 (briefs, runs, cached events). If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
-- Frontend: React (Vite + TypeScript) + react-three-fiber, served as the Worker's static assets.
+- Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 planned for briefs, runs and cached events. See [deployment](../server/README.md#deploy-cloudflare) for current storage limits. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
+- Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Web search: Anchor.
 - Voice: ElevenLabs text-to-speech, one cloned voice per member (`ELEVENLABS_VOICE_<MEMBER>`).
@@ -81,7 +82,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
   - Knowledge Base: each member is a PRISM agent with its own documents; retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
   - `server/scripts/seed_runs.py` runs 50+ council runs over varied inputs so PRISM has data before any fixing.
 
-Secrets (Worker secrets, names in `.env.example`): `NICRRON_API_KEY`, `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST`, `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT`, `ELEVENLABS_VOICE_CRAMER`, `ELEVENLABS_VOICE_BURRY`, `ELEVENLABS_VOICE_LEOPOLD`.
+For supported settings, see [Env names](../server/README.md#env-names); for Worker secret uploads, see [Deploy (Cloudflare)](../server/README.md#deploy-cloudflare).
 
 ## Repo layout
 
@@ -99,11 +100,11 @@ The earlier TypeScript starter (working Nicrron call + PRISM trace and span inge
 
 ## Later
 
-| | v1 | v2 |
-|---|---|---|
-| UI | Talking heads | Live voice conversation |
-| Research | Deep research; earnings (Apple, Comcast); NA + Europe | Socials |
-| Bank data | Plaid Link (real connect flow) | - |
+|           | v1                                                    | v2                      |
+| --------- | ----------------------------------------------------- | ----------------------- |
+| UI        | Talking heads                                         | Live voice conversation |
+| Research  | Deep research; earnings (Apple, Comcast); NA + Europe | Socials                 |
+| Bank data | Plaid Link (real connect flow)                        | -                       |
 
 ## Out of scope for v0
 

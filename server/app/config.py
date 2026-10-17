@@ -5,12 +5,15 @@ MEMBERS = ("buffett", "dalio", "burry", "leopold", "cramer")
 CHAIR = "chair"  # the neutral coordinator; speaks but is not one of the five
 SPEAKERS = (*MEMBERS, CHAIR)
 COUNCIL_DIR = Path(__file__).resolve().parent.parent / "council"
-ENV_FILE = Path(__file__).resolve().parents[2] / ".env"  # repo-root .env (gitignored); see .env.example
+ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"  # repo-root .env (gitignored); absent on Workers
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:
     """KEY=value lines into os.environ; variables already set in the shell win."""
-    if not path.is_file():
+    try:
+        if not path.is_file():
+            return
+    except OSError:  # restricted filesystems (Cloudflare Workers): settings come from the env binding instead
         return
     for line in path.read_text().splitlines():
         key, sep, value = line.strip().partition("=")
