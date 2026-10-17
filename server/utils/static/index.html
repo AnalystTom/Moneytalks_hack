@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Position Analyst — demo</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121820; --panel2:#171f29; --line:#232e3b;
+    --ink:#e6edf5; --dim:#8b9bad; --faint:#5d6c7d;
+    --up:#37d399; --down:#ff6b6b; --warn:#f6c352; --accent:#4cc9f0;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:1280px;margin:0 auto;padding:22px 20px 60px}
+  header{display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;
+    justify-content:space-between;margin-bottom:6px}
+  h1{font-size:19px;margin:0;letter-spacing:-.2px}
+  h1 span{color:var(--faint);font-weight:400}
+  .meta{font:12px/1.4 var(--mono);color:var(--dim);text-align:right}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--dim)}
+  .banner{margin:14px 0 20px;padding:9px 12px;border-radius:8px;font-size:12px;
+    background:#1d1705;border:1px solid #4a3a08;color:#f0d79a}
+  .kpis{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));
+    margin-bottom:20px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 13px}
+  .kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+  .kpi .v{font:600 20px/1.25 var(--mono);margin-top:5px;letter-spacing:-.5px}
+  .kpi .s{font-size:11px;color:var(--dim);margin-top:2px}
+  .grid{display:grid;gap:16px;grid-template-columns:1.55fr 1fr;align-items:start}
+  @media(max-width:950px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    overflow:hidden;margin-bottom:16px}
+  .card>h2{margin:0;padding:11px 14px;font-size:12px;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--dim);border-bottom:1px solid var(--line);
+    background:var(--panel2);font-weight:600}
+  .card .body{padding:13px 14px}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font:12.5px/1.45 var(--mono);white-space:nowrap}
+  th{text-align:right;color:var(--faint);font-weight:500;font-size:11px;
+    padding:8px 10px;border-bottom:1px solid var(--line);text-transform:uppercase;
+    letter-spacing:.05em;position:sticky;top:0;background:var(--panel2)}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:7px 10px;border-bottom:1px solid #1a222c}
+  tbody tr:hover{background:#18212c}
+  .sym{font-weight:600;color:var(--ink)}
+  .nm{display:block;font:11px/1.3 -apple-system,sans-serif;color:var(--faint);
+    max-width:150px;overflow:hidden;text-overflow:ellipsis}
+  .up{color:var(--up)} .down{color:var(--down)}
+  .tag{font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);
+    color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  .tag.core{border-color:#1f5e4a;color:#6fe0b4;background:#0e2a22}
+  .tag.satellite{border-color:#2a4a6b;color:#8fc4f0;background:#102333}
+  .tag.speculative{border-color:#6b3a2a;color:#f0a98f;background:#331a10}
+  .bar{height:5px;border-radius:3px;background:#1d2733;overflow:hidden;margin-top:4px}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .srow{display:flex;justify-content:space-between;gap:10px;font:12px/1.5 var(--mono);
+    padding:6px 0;border-bottom:1px solid #1a222c}
+  .srow:last-child{border-bottom:0}
+  .flag{border-left:3px solid var(--line);padding:8px 0 8px 11px;margin-bottom:11px}
+  .flag.high{border-color:var(--down)} .flag.medium{border-color:var(--warn)}
+  .flag.low{border-color:var(--faint)}
+  .flag b{display:block;font-size:12.5px;margin-bottom:3px}
+  .flag p{margin:0;font-size:12px;color:var(--dim)}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .tab{cursor:pointer;border:1px solid var(--line);background:var(--panel2);
+    color:var(--dim);border-radius:7px;padding:7px 10px;font-size:12px;
+    display:flex;gap:7px;align-items:center;font-family:inherit}
+  .tab:hover{border-color:#36465a;color:var(--ink)}
+  .tab.on{border-color:var(--accent);color:var(--ink);background:#102634}
+  .tab em{font:600 11px var(--mono);font-style:normal;color:var(--faint)}
+  .tab.on em{color:var(--accent)}
+  .obs{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #1a222c}
+  .obs:last-child{border-bottom:0}
+  .obs .v{flex:0 0 68px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    padding-top:2px;font-weight:600}
+  .v.aligned{color:var(--up)} .v.tension{color:var(--warn)} .v.note{color:var(--faint)}
+  .obs p{margin:0;font-size:13px;color:#cfdae6}
+  .prin{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 14px}
+  .prin span{font-size:11.5px;color:var(--dim);background:var(--panel2);
+    border:1px solid var(--line);border-radius:5px;padding:3px 8px}
+  .foot{color:var(--faint);font-size:11.5px;margin-top:18px;line-height:1.6}
+  code{font:12px var(--mono);background:var(--panel2);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Position Analyst <span>/ portfolio structure &amp; style fit</span></h1>
+    <div class="meta">
+      <span class="pill" id="brokerPill">loading…</span><br>
+      <span id="acct"></span>
+    </div>
+  </header>
+
+  <div class="banner" id="disclaimer">Loading…</div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Positions</h2>
+        <div class="scroll"><table id="posTable">
+          <thead><tr>
+            <th>Symbol</th><th>Qty</th><th>Entry</th><th>Last</th>
+            <th>Mkt value</th><th>Unreal. P/L</th><th>%</th><th>Weight</th>
+            <th>Held</th><th>β</th><th>Off high</th><th>Role</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <h2>Trading-style lens</h2>
+        <div class="tabs" id="tabs"></div>
+        <div class="body" id="styleBody"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Risk observations</h2>
+        <div class="body" id="flags"></div>
+      </div>
+      <div class="card">
+        <h2>Sector exposure <span style="text-transform:none;letter-spacing:0;color:var(--faint)">vs broad market</span></h2>
+        <div class="body" id="sectors"></div>
+      </div>
+      <div class="card">
+        <h2>Concentration &amp; tilts</h2>
+        <div class="body" id="tilts"></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">
+    Backed by <code>GET /api/analysis</code> and <code>GET /api/styles</code>.
+    Swap the mock broker for a real Alpaca paper account with
+    <code>BROKER=alpaca</code> — no other code changes.
+  </p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const money = n => (n<0?"-$":"$") + Math.abs(n).toLocaleString(undefined,{maximumFractionDigits:0});
+const money2 = n => "$" + n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct = n => (n>0?"+":"") + n.toFixed(2) + "%";
+const sign = n => n>0?"up":(n<0?"down":"");
+let STYLES = [], active = null;
+
+async function get(u){ const r = await fetch(u); return r.json(); }
+
+function kpi(k,v,s,cls){
+  return `<div class="kpi"><div class="k">${k}</div>
+    <div class="v ${cls||""}">${v}</div><div class="s">${s||""}</div></div>`;
+}
+
+function renderAnalysis(a){
+  const s = a.summary, c = a.concentration;
+  $("#brokerPill").textContent = a.broker.label;
+  $("#acct").textContent = a.account.account_number + " · " + a.account.status;
+
+  $("#kpis").innerHTML = [
+    kpi("Equity", money2(s.equity), s.position_count + " positions · " + s.cash_pct + "% cash"),
+    kpi("Unrealized P/L", money(s.unrealized_pl), pct(s.unrealized_pl_pct) + " on cost", sign(s.unrealized_pl)),
+    kpi("Portfolio beta", s.portfolio_beta.toFixed(2), s.portfolio_beta>1 ? "more volatile than index" : "less volatile than index"),
+    kpi("Est. yield", s.est_yield.toFixed(2)+"%", money(s.est_annual_income) + "/yr"),
+    kpi("Top holding", c.names[0].symbol, c.top1 + "% of holdings", c.top1>=15?"down":""),
+    kpi("Effective positions", c.effective_positions, "of " + s.position_count + " tickers held"),
+    kpi("Win / loss", s.winners + " / " + s.losers, "best " + s.best + " · worst " + s.worst),
+  ].join("");
+
+  $("#posTable tbody").innerHTML = a.positions.map(p => `<tr>
+    <td><span class="sym">${p.symbol}</span><span class="nm">${p.name}</span></td>
+    <td>${p.qty}</td><td>${money2(p.avg_entry_price)}</td><td>${money2(p.current_price)}</td>
+    <td>${money(p.market_value)}</td>
+    <td class="${sign(p.unrealized_pl)}">${money(p.unrealized_pl)}</td>
+    <td class="${sign(p.pnl_pct)}">${pct(p.pnl_pct)}</td>
+    <td>${p.weight}%<div class="bar"><i style="width:${Math.min(100,p.weight*4)}%"></i></div></td>
+    <td>${p.days_held==null?"—":p.days_held+"d"}</td>
+    <td>${p.beta.toFixed(2)}</td>
+    <td class="${p.pct_off_high<-20?"down":""}">${p.pct_off_high==null?"—":p.pct_off_high+"%"}</td>
+    <td><span class="tag ${p.role}">${p.role}</span></td></tr>`).join("");
+
+  $("#flags").innerHTML = a.flags.map(f => `<div class="flag ${f.level}">
+    <b>${f.title}</b><p>${f.detail}</p></div>`).join("")
+    || '<p style="color:var(--dim)">No threshold breaches.</p>';
+
+  $("#sectors").innerHTML = a.sectors.map(x => {
+    const d = x.delta==null ? '<span style="color:var(--faint)">n/a</span>'
+      : `<span class="${x.delta>0?'down':'up'}">${x.delta>0?"+":""}${x.delta}</span>`;
+    return `<div class="srow"><span>${x.sector}</span>
+      <span>${x.weight}% ${x.benchmark!=null?`<span style="color:var(--faint)">/ ${x.benchmark}%</span>`:""} &nbsp;${d}</span></div>`;
+  }).join("");
+
+  const t = a.tilts;
+  $("#tilts").innerHTML = [
+    ["Top 1 / 3 / 5", `${c.top1}% / ${c.top3}% / ${c.top5}%`],
+    ["HHI", c.hhi],
+    ["Growth / value / blend", `${t.growth}% / ${t.value}% / ${t.blend}%`],
+    ["ETF / single-name", `${t.etf}% / ${t.single_name}%`],
+    ["High β / low β", `${t.high_beta}% / ${t.low_beta}%`],
+    ["Unprofitable cos.", t.unprofitable + "%"],
+    ["Core / satellite / spec", `${t.core}% / ${t.satellite}% / ${t.speculative_role}%`],
+    ["Held <90d / >1yr", `${t.short_term}% / ${t.long_term}%`],
+  ].map(([k,v]) => `<div class="srow"><span style="color:var(--dim)">${k}</span><span>${v}</span></div>`).join("");
+}
+
+function renderStyle(id){
+  active = id;
+  const s = STYLES.find(x => x.id === id);
+  $("#tabs").querySelectorAll(".tab").forEach(b =>
+    b.classList.toggle("on", b.dataset.id === id));
+  $("#styleBody").innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
+      <div><strong style="font-size:15px">${s.name}</strong>
+        <span style="color:var(--faint);font-size:12px"> · ${s.horizon}</span>
+        <div style="color:var(--dim);font-size:12.5px;margin-top:2px">${s.tagline}</div></div>
+      <div style="text-align:right">
+        <div style="font:600 22px var(--mono);color:${s.alignment>=60?"var(--up)":s.alignment>=40?"var(--warn)":"var(--down)"}">${s.alignment}<span style="font-size:12px;color:var(--faint)">/100</span></div>
+        <div style="font-size:11px;color:var(--faint)">structural fit</div></div>
+    </div>
+    <div class="prin">${s.principles.map(p=>`<span>${p}</span>`).join("")}</div>
+    ${s.observations.map(o=>`<div class="obs"><div class="v ${o.verdict}">${o.verdict}</div><p>${o.text}</p></div>`).join("")}`;
+}
+
+async function boot(){
+  const [a, st] = await Promise.all([get("/api/analysis"), get("/api/styles")]);
+  renderAnalysis(a);
+  STYLES = st.styles;
+  $("#disclaimer").textContent = st.disclaimer;
+  $("#tabs").innerHTML = STYLES.map(s =>
+    `<button class="tab" data-id="${s.id}">${s.name} <em>${s.alignment}</em></button>`).join("");
+  $("#tabs").querySelectorAll(".tab").forEach(b =>
+    b.onclick = () => renderStyle(b.dataset.id));
+  renderStyle(active && STYLES.some(s=>s.id===active) ? active : STYLES[0].id);
+}
+boot();
+setInterval(async () => {
+  const [a, st] = await Promise.all([get("/api/analysis"), get("/api/styles")]);
+  renderAnalysis(a); STYLES = st.styles;
+  $("#tabs").querySelectorAll(".tab em").forEach(e => {
+    const s = STYLES.find(x => x.id === e.parentElement.dataset.id);
+    if (s) e.textContent = s.alignment;
+  });
+  renderStyle(active);
+}, 6000);
+</script>
+</body>
+</html>
