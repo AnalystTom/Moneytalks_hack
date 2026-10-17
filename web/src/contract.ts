@@ -1,29 +1,15 @@
 export const members = {
   buffett: {
     name: "Warren Buffett",
-    role: "Fundamentals",
-    portrait: "/portraits/buffett.png",
-  },
-  dalio: {
-    name: "Ray Dalio",
-    role: "The macro mind",
-    portrait: "/portraits/dalio.svg",
+    role: "The chair · fundamentals",
   },
   leopold: {
     name: "Leopold Aschenbrenner",
     role: "The AI optimist",
-    portrait: "/portraits/leopold.png",
   },
-  burry: {
-    name: "Michael Burry",
-    role: "The contrarian",
-    portrait: "/portraits/burry.png",
-  },
-  cramer: {
-    name: "Jim Cramer",
-    role: "The momentum man",
-    portrait: "/portraits/cramer.png",
-  },
+  burry: { name: "Michael Burry", role: "The contrarian" },
+  cramer: { name: "Jim Cramer", role: "The momentum man" },
+  dalio: { name: "Ray Dalio", role: "The macro thinker" },
 } as const;
 export type Member = keyof typeof members;
 export type Speaker = Member | "chair";
@@ -46,6 +32,7 @@ export type Verdict = {
   member: Member;
   signal?: Signal;
   headline: string;
+  speech_bubble?: string;
   reasons: string[];
   sources: Source[];
   tickers: string[];
@@ -58,6 +45,7 @@ export type Chair = {
   consensus: string;
   dissent: string[];
   summary: string;
+  speech_bubble?: string;
   actions: string[];
   suggestions: string[];
   positions: NameRuling[];

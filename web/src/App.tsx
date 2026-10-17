@@ -1,3 +1,5 @@
+import { animateEvent, bubbleLine } from "./animation";
+import type { AnimationState } from "./animation";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -17,7 +19,6 @@ import type {
   Verdict,
 } from "./contract";
 const Boardroom = lazy(() => import("./Boardroom"));
-const memberIds = Object.keys(members) as Member[];
 const pause = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -49,48 +50,40 @@ function VerdictCard({
     <article className="verdict-card">
       <div className="card-top">
         <span>{members[verdict.member].name}</span>
-        <span className={`signal ${verdict.signal?.toLowerCase() || ""}`}>
-          {verdict.signal || "Pending"}
-        </span>
+        {verdict.signal && (
+          <span className={`signal ${verdict.signal.toLowerCase()}`}>
+            {verdict.signal}
+          </span>
+        )}
       </div>
-      <h3>{verdict.headline}</h3>
-      {verdict.tickers.length > 0 && (
-        <p className="muted">{verdict.tickers.join(", ")}</p>
-      )}
-      {!verdict.positions.length && <p className="muted">No calls returned.</p>}
+      <h3>{bubbleLine(verdict.speech_bubble || verdict.headline)}</h3>
+      <p className="muted">
+        {verdict.positions.length
+          ? verdict.positions
+              .map(
+                (call) => `${call.ticker} ${call.signal} · ${call.conviction}`,
+              )
+              .join(" · ")
+          : "No calls returned."}
+      </p>
       <details open={open || undefined}>
         <summary>
           View more <span>↗</span>
         </summary>
-        {verdict.analysis && <p>{verdict.analysis}</p>}
-        {verdict.positions.length > 0 && (
-          <ul className="calls">
-            {verdict.positions.map((call) => (
-              <li key={call.ticker}>
-                <b className={`signal ${call.signal.toLowerCase()}`}>
-                  {call.ticker} {call.signal}
-                </b>
-                <small>{call.conviction} conviction</small>
-                <span>{call.rationale}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <p>{verdict.analysis || verdict.headline}</p>
+        {verdict.positions.map((call) => (
+          <p key={call.ticker}>
+            <b className={`signal ${call.signal.toLowerCase()}`}>
+              {call.ticker} {call.signal}
+            </b>{" "}
+            <small>{call.conviction} conviction</small> {call.rationale}
+          </p>
+        ))}
         <ul className="reasons">
           {verdict.reasons.map((reason, i) => (
             <li key={i}>{reason}</li>
           ))}
         </ul>
-        {verdict.advice.length > 0 && (
-          <>
-            <h4>What to do</h4>
-            <ul>
-              {verdict.advice.map((item, i) => (
-                <li key={i}>{item.action}</li>
-              ))}
-            </ul>
-          </>
-        )}
         <h4>Sources</h4>
         <Sources sources={verdict.sources} />
       </details>
@@ -107,29 +100,30 @@ function ChairRuling({
 }) {
   return (
     <article className="ruling">
-      <p className="eyebrow">THE CHAIR</p>
       <div className="card-top">
         <h2>Council ruling</h2>
-        <span className={`signal ${chair.overall_signal?.toLowerCase() || ""}`}>
-          {chair.overall_signal || "Pending"}
-        </span>
+        {chair.overall_signal && (
+          <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
+            {chair.overall_signal}
+          </span>
+        )}
       </div>
-      <p>{chair.summary}</p>
-      <div className="ruling-chips">
-        {chair.positions.map((name) => (
-          <b
-            key={name.ticker}
-            className={`signal ${name.signal.toLowerCase()}`}
-            title={name.consensus}
-          >
-            {name.ticker} {name.signal} · {name.conviction}
-          </b>
-        ))}
-      </div>
+      <p>{bubbleLine(chair.speech_bubble || chair.summary)}</p>
       <details open={open || undefined}>
-        <summary>
-          View more <span>↗</span>
-        </summary>
+        <summary>View more ↗</summary>
+        <p>{chair.summary}</p>
+        {chair.positions.length > 0 && (
+          <p className="ruling-chips">
+            {chair.positions.map((name) => (
+              <b
+                key={name.ticker}
+                className={`signal ${name.signal.toLowerCase()}`}
+              >
+                {name.ticker} {name.signal} · {name.conviction}
+              </b>
+            ))}
+          </p>
+        )}
         <h4>Consensus</h4>
         <p>{chair.consensus}</p>
         <h4>Dissent</h4>
@@ -154,41 +148,6 @@ function ChairRuling({
         )}
       </details>
     </article>
-  );
-}
-
-type ChatItem =
-  | { kind: "user"; text: string }
-  | { kind: "routed"; members: Speaker[]; reason: string }
-  | { kind: "reply"; member: Speaker; text: string };
-const speakerName = (speaker: Speaker) =>
-  speaker === "chair" ? "The chair" : members[speaker].name;
-const firstName = (speaker: Speaker) => speakerName(speaker).split(" ").pop();
-
-function ChatMessage({ item }: { item: ChatItem }) {
-  if (item.kind === "user") return <p className="user-question">{item.text}</p>;
-  if (item.kind === "routed")
-    return (
-      <p className="routed">
-        Asking {item.members.map(firstName).join(" and ")} · {item.reason}
-      </p>
-    );
-  return (
-    <div className="chat-message">
-      {item.member === "chair" ? (
-        <span className="chat-avatar chair">C</span>
-      ) : (
-        <img
-          className="chat-avatar"
-          src={members[item.member].portrait}
-          alt=""
-        />
-      )}
-      <div>
-        <strong>{speakerName(item.member)}</strong>
-        <p>{item.text}</p>
-      </div>
-    </div>
   );
 }
 
@@ -227,44 +186,59 @@ function MemberDialog({
 }
 
 export default function App() {
-  const [portfolio, setPortfolio] = useState<File>();
-  const [persona, setPersona] = useState("");
-  const [personaName, setPersonaName] = useState("");
-  const [plaid, setPlaid] = useState(false);
-  const [demo, setDemo] = useState(false);
+  const [context, setContext] = useState<{ briefId: string; label: string }>();
+  const [loadingContext, setLoadingContext] = useState(true);
   const [question, setQuestion] = useState("");
   const [roast, setRoast] = useState(false);
   const [sound, setSound] = useState(true);
+  const [voiceAvailable, setVoiceAvailable] = useState(false);
+  const [animation, setAnimation] = useState<AnimationState>({});
   const [busy, setBusy] = useState(false);
-  const [loadingDemo, setLoadingDemo] = useState(false);
   const [stage, setStage] = useState("Your seat is waiting.");
   const [error, setError] = useState("");
-  const [summary, setSummary] = useState("");
   const [runId, setRunId] = useState("");
+  const [runFinished, setRunFinished] = useState(false);
   const [active, setActive] = useState<Member>();
-  const [selected, setSelected] = useState<Member | "chair">();
-  const [presented, setPresented] = useState<Verdict>();
-  const [statuses, setStatuses] = useState<Partial<Record<Speaker, string>>>(
-    {},
-  );
+  const [selected, setSelected] = useState<Member>();
+  const [replyTo, setReplyTo] = useState<Member>();
+  const [statuses, setStatuses] = useState<Partial<Record<Member, string>>>({});
   const [sources, setSources] = useState<Partial<Record<Member, Source[]>>>({});
   const [verdicts, setVerdicts] = useState<Partial<Record<Member, Verdict>>>(
     {},
   );
   const [chair, setChair] = useState<Chair>();
   const [drumming, setDrumming] = useState(false);
-  const [followQuestion, setFollowQuestion] = useState("");
-  const [conversation, setConversation] = useState<ChatItem[]>([]);
+  const [messages, setMessages] = useState<
+    (
+      | { kind: "user"; text: string }
+      | { kind: "verdict"; verdict: Verdict }
+      | { kind: "chair"; chair: Chair }
+      | { kind: "routed"; members: Speaker[]; reason: string }
+      | { kind: "reply"; member: Speaker; text: string }
+    )[]
+  >([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [audioMessage, setAudioMessage] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const controller = useRef<AbortController | null>(null);
+  const contextController = useRef<AbortController | null>(null);
+  const persona = useRef("");
+  const acceptedPortfolio = useRef<{ file: File; label: string } | undefined>(
+    undefined,
+  );
   const audio = useRef<HTMLAudioElement | null>(null);
+  const audioMember = useRef<Member | undefined>(undefined);
   const soundEnabled = useRef(sound);
+  const voiceEnabled = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
-  const [runFinished, setRunFinished] = useState(false);
 
+  useEffect(() => {
+    const abort = new AbortController();
+    contextController.current = abort;
+    void loadContext(abort.signal);
+    return () => abort.abort();
+  }, []);
   useEffect(() => {
     soundEnabled.current = sound;
     if (!sound) audio.current?.pause();
@@ -272,19 +246,102 @@ export default function App() {
   useEffect(
     () => () => {
       controller.current?.abort();
+      contextController.current?.abort();
       audio.current?.pause();
       void audioContext.current?.close();
     },
     [],
   );
   useEffect(() => {
-    if (summary)
-      transcriptEnd.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-  }, [summary, chair, conversation, busy]);
+    const scroll = transcriptEnd.current?.parentElement;
+    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  }, [messages, busy]);
 
+  async function loadContext(signal: AbortSignal, replacement?: File) {
+    setLoadingContext(true);
+    setError("");
+    try {
+      let file = replacement ?? acceptedPortfolio.current?.file;
+      if (!file || !persona.current) {
+        const [portfolioResponse, profileResponse] = await Promise.all([
+          fetch("/demo-portfolio.json", { signal }),
+          fetch("/demo-persona.md", { signal }),
+        ]);
+        if (!portfolioResponse.ok || !profileResponse.ok)
+          throw new Error("Portfolio context is unavailable. Please retry.");
+        persona.current = await profileResponse.text();
+        file ??= portfolioFile(await portfolioResponse.json());
+      }
+      file = await ingestPortfolio(file);
+      const form = new FormData();
+      form.append("portfolio", file);
+      form.append(
+        "persona",
+        new File([persona.current], "persona.md", { type: "text/markdown" }),
+      );
+      form.append("plaid", "false");
+      const response = await fetch("/api/ingest", {
+        method: "POST",
+        body: form,
+        signal,
+      });
+      if (!response.ok) throw await apiError(response);
+      const brief = await response.json();
+      if (
+        typeof brief.brief_id !== "string" ||
+        typeof brief.summary !== "string"
+      )
+        throw new Error("The server returned an invalid client brief.");
+      signal.throwIfAborted();
+      const name = persona.current
+        .match(/\|\s*\*\*Name\*\*\s*\|\s*([^|]+)/)?.[1]
+        ?.trim()
+        .split(/\s+/)[0];
+      const label = replacement
+        ? `${replacement.name} loaded`
+        : (acceptedPortfolio.current?.label ??
+          (name ? `${name}’s portfolio loaded` : "Portfolio loaded"));
+      acceptedPortfolio.current = { file, label };
+      setContext({ briefId: brief.brief_id, label });
+      setRunId("");
+      setRunFinished(false);
+      setReplyTo(undefined);
+      if (replacement) {
+        setMessages([]);
+        setVerdicts({});
+        setChair(undefined);
+        setStatuses({});
+        setSources({});
+        setSelected(undefined);
+        setStage("Your seat is waiting.");
+        setAudioUrl("");
+        audio.current?.pause();
+      }
+    } catch (cause) {
+      if (!signal.aborted)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not load portfolio context.",
+        );
+    } finally {
+      if (!signal.aborted) setLoadingContext(false);
+    }
+  }
+  async function checkVoice(signal: AbortSignal) {
+    voiceEnabled.current = false;
+    setVoiceAvailable(false);
+    try {
+      const response = await fetch("/api/health", { signal });
+      if (response.ok) {
+        const health = await response.json();
+        voiceEnabled.current = health.voice === true;
+        setVoiceAvailable(voiceEnabled.current);
+      }
+    } catch {
+      // Text answers stay available when the capability check fails.
+    }
+  }
   function unlockSound() {
     if (!sound) return;
     try {
@@ -296,8 +353,8 @@ export default function App() {
   }
   async function drumRoll() {
     setDrumming(true);
-    setActive(undefined);
-    setStage("The council has spoken. The chair has the floor.");
+    setActive("buffett");
+    setStage("The council has spoken. Warren has the floor.");
     const context = audioContext.current;
     if (soundEnabled.current && context?.state === "running") {
       for (let i = 0; i < 23; i++) {
@@ -318,7 +375,9 @@ export default function App() {
     await pause(1700);
     setDrumming(false);
   }
-  async function playAudio(url: string, signal: AbortSignal) {
+  async function playAudio(url: string, signal: AbortSignal, member: Member) {
+    if (!voiceEnabled.current || !soundEnabled.current || signal.aborted)
+      return;
     // Only same-origin backend speech is allowed; never load an arbitrary tracking URL.
     const parsed = new URL(url, window.location.origin);
     if (
@@ -328,6 +387,7 @@ export default function App() {
       setAudioMessage("The server returned an unsupported audio URL.");
       return;
     }
+    audioMember.current = member;
     setAudioUrl(parsed.href);
     const player = audio.current;
     if (!player || signal.aborted) return;
@@ -346,6 +406,9 @@ export default function App() {
         player.ontimeupdate = null;
         signal.removeEventListener("abort", finish);
         player.pause();
+        setAnimation((previous) =>
+          animateEvent(previous, { event: "audio.stopped", data: { member } }),
+        );
         resolve();
       };
       const stalled = () => {
@@ -363,7 +426,15 @@ export default function App() {
         if (!player.ended) finish();
       };
       player.onplaying = () => {
-        if (!settled) setAudioMessage("");
+        if (!settled) {
+          setAudioMessage("");
+          setAnimation((previous) =>
+            animateEvent(previous, {
+              event: "audio.playing",
+              data: { member },
+            }),
+          );
+        }
       };
       player.ontimeupdate = () => {
         if (settled || player.currentTime === position) return;
@@ -373,6 +444,9 @@ export default function App() {
       };
       player.onerror = () => {
         if (settled) return;
+        voiceEnabled.current = false;
+        setVoiceAvailable(false);
+        setAudioUrl("");
         setAudioMessage(
           "Voice unavailable from the server. All answers remain in the transcript.",
         );
@@ -387,12 +461,9 @@ export default function App() {
       });
     });
   }
-  async function receive(
-    event: CouncilEvent,
-    signal: AbortSignal,
-    follow: boolean,
-  ) {
+  async function receive(event: CouncilEvent, signal: AbortSignal) {
     if (signal.aborted) return;
+    setAnimation((previous) => animateEvent(previous, event));
     switch (event.event) {
       case "run.started":
         setRunId(event.data.run_id);
@@ -406,6 +477,10 @@ export default function App() {
           setStage("The council is doing its homework.");
         if (event.data.status === "speaking" && event.data.member !== "chair")
           setActive(event.data.member);
+        if (event.data.status === "done")
+          setActive((previous) =>
+            previous === event.data.member ? undefined : previous,
+          );
         break;
       case "member.source":
         setSources((previous) => ({
@@ -417,51 +492,79 @@ export default function App() {
         }));
         break;
       case "member.verdict":
-        setPresented(event.data);
         setActive(event.data.member);
         setStage(`${members[event.data.member].name} has a verdict.`);
         setVerdicts((previous) => ({
           ...previous,
           [event.data.member]: event.data,
         }));
+        if (event.data.member === "buffett") setChair(undefined);
+        setMessages((previous) => [
+          ...previous,
+          { kind: "verdict", verdict: event.data },
+        ]);
         await pause(1200);
+        setAnimation((previous) =>
+          animateEvent(previous, {
+            event: "presentation.done",
+            data: { member: event.data.member },
+          }),
+        );
         break;
       case "chair.summary":
         await drumRoll();
         if (!signal.aborted) {
           setChair(event.data);
+          setMessages((previous) => [
+            ...previous,
+            { kind: "chair", chair: event.data },
+          ]);
+          setAnimation((previous) =>
+            animateEvent(previous, { event: "chair.revealed" }),
+          );
           setSuggestions(event.data.suggestions);
           setStage("The council ruling is in.");
         }
         break;
       case "chat.routed":
-        setConversation((previous) => [
+        setMessages((previous) => [
           ...previous,
           { kind: "routed", ...event.data },
         ]);
         break;
       case "member.reply":
-        setConversation((previous) => [
+        setMessages((previous) => [
           ...previous,
           { kind: "reply", member: event.data.member, text: event.data.text },
         ]);
         break;
       case "chat.closed":
         if (event.data.text)
-          setConversation((previous) => [
+          setMessages((previous) => [
             ...previous,
             { kind: "reply", member: "chair", text: event.data.text },
           ]);
         setSuggestions(event.data.suggestions);
         break;
       case "member.audio":
-        await playAudio(event.data.audio_url, signal);
+        if (event.data.member === "chair") break;
+        if (voiceEnabled.current && soundEnabled.current) {
+          await playAudio(event.data.audio_url, signal, event.data.member);
+        } else {
+          setAnimation((previous) => ({
+            ...previous,
+            [event.data.member]: "speaking",
+          }));
+          await pause(1200);
+          setAnimation((previous) => ({
+            ...previous,
+            [event.data.member]: "idle",
+          }));
+        }
         break;
       case "run.done":
         setRunFinished(true);
-        setStage(
-          follow ? "Your follow-up is complete." : "The floor is yours.",
-        );
+        setStage("The floor is yours.");
         setActive(undefined);
         break;
       case "run.error":
@@ -469,35 +572,10 @@ export default function App() {
         break;
     }
   }
-  async function loadDemo() {
-    setError("");
-    setLoadingDemo(true);
-    try {
-      const [response, profile] = await Promise.all([
-        fetch("/demo-portfolio.json"),
-        fetch("/demo-persona.md"),
-      ]);
-      if (!response.ok || !profile.ok)
-        throw new Error(
-          "The demo portfolio is unavailable. Upload your own portfolio to continue.",
-        );
-      const [snapshot, profileText] = await Promise.all([
-        response.json(),
-        profile.text(),
-      ]);
-      setPortfolio(portfolioFile(snapshot));
-      setDemo(true);
-      setPlaid(true);
-      setPersona(profileText);
-      setPersonaName("PERSONA.md · demo profile");
-      setQuestion("Keep dollar-cost averaging, sell, or move somewhere else?");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load demo.");
-    } finally {
-      setLoadingDemo(false);
-    }
-  }
-  async function execute(follow: boolean, text = followQuestion) {
+  async function execute(text = question) {
+    if (busy || loadingContext || !context || !text.trim()) return;
+    const message = text.trim();
+    const follow = !!runId && runFinished;
     const abort = new AbortController();
     controller.current = abort;
     const timedOut = () => abort.abort("The council timed out. Please retry.");
@@ -505,7 +583,7 @@ export default function App() {
     const receiveEvent = async (event: CouncilEvent) => {
       clearTimeout(timeout);
       try {
-        await receive(event, abort.signal, follow);
+        await receive(event, abort.signal);
       } finally {
         if (!abort.signal.aborted) timeout = setTimeout(timedOut, 180000);
       }
@@ -514,64 +592,66 @@ export default function App() {
     setError("");
     setAudioMessage("");
     if (!follow) setRunFinished(false);
+    setMessages((previous) => [...previous, { kind: "user", text: message }]);
+    setQuestion("");
     unlockSound();
     try {
+      setAudioUrl("");
+      await checkVoice(abort.signal);
+      abort.signal.throwIfAborted();
       if (follow) {
-        setConversation((previous) => [...previous, { kind: "user", text }]);
         setSuggestions([]);
         await streamCouncil(
           "/api/council/chat",
-          { run_id: runId, text, roast },
+          {
+            run_id: runId,
+            text: message,
+            to: replyTo ? [replyTo] : [],
+            roast,
+          },
           abort.signal,
           receiveEvent,
         );
-        setFollowQuestion("");
       } else {
-        if (!portfolio) throw new Error("Upload a portfolio first.");
-        setSummary("");
         setRunId("");
+        setSuggestions([]);
         setChair(undefined);
         setVerdicts({});
-        setPresented(undefined);
         setSources({});
         setStatuses({});
-        setConversation([]);
         setSelected(undefined);
-        setStage("Preparing your client brief…");
-        const form = new FormData();
-        form.append("portfolio", await ingestPortfolio(portfolio));
-        form.append(
-          "persona",
-          new File([persona], "persona.md", { type: "text/markdown" }),
-        );
-        form.append("plaid", String(plaid));
-        const response = await fetch("/api/ingest", {
-          method: "POST",
-          body: form,
-          signal: abort.signal,
-        });
-        if (!response.ok) throw await apiError(response);
-        const brief = await response.json();
-        if (
-          typeof brief.brief_id !== "string" ||
-          typeof brief.summary !== "string"
-        )
-          throw new Error("The server returned an invalid client brief.");
-        setSummary(brief.summary);
+        setStage("The council is considering your question.");
         await streamCouncil(
           "/api/council/run",
-          { brief_id: brief.brief_id, question, roast },
+          {
+            brief_id: context.briefId,
+            question: message,
+            roast,
+          },
           abort.signal,
           receiveEvent,
         );
       }
     } catch (cause) {
+      const expired =
+        !abort.signal.aborted &&
+        cause instanceof Error &&
+        ["unknown brief_id", "unknown run_id"].includes(cause.message);
+      if (expired) {
+        setContext(undefined);
+        setRunId("");
+        setRunFinished(false);
+        setReplyTo(undefined);
+      }
+      setQuestion(message);
       setError(
         abort.signal.aborted
           ? String(abort.signal.reason || "Council cancelled.")
-          : cause instanceof Error
-            ? cause.message
-            : "The council could not connect.",
+          : expired
+            ? "Portfolio context expired. Retry loading it or replace the portfolio."
+            : cause instanceof Error
+              ? cause.message
+              : "The council could not connect.",
       );
       setStage("Session interrupted. You can retry.");
     } finally {
@@ -579,18 +659,15 @@ export default function App() {
       setBusy(false);
       setDrumming(false);
       setActive(undefined);
+      setAnimation({});
     }
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    void execute(false);
+    void execute();
   }
-  const hasResults = !!summary;
-  const boardVerdicts = { ...verdicts };
-  if (presented) boardVerdicts[presented.member] = presented;
-  const boardChair = chair;
-  const selectedVerdict =
-    selected && selected !== "chair" ? boardVerdicts[selected] : undefined;
+  const hasResults = messages.some((message) => message.kind !== "user");
+  const selectedVerdict = selected ? verdicts[selected] : undefined;
   return (
     <div className="app">
       <header className="topbar">
@@ -627,7 +704,9 @@ export default function App() {
           aria-label="Council boardroom"
         >
           <div className="scene-heading">
-            <p className="eyebrow">YOUR PORTFOLIO. FIVE PERSPECTIVES.</p>
+            <p className="eyebrow">
+              YOUR PORTFOLIO. THE COUNCIL’S PERSPECTIVE.
+            </p>
             <h1>
               {drumming
                 ? "One final word."
@@ -645,10 +724,11 @@ export default function App() {
             >
               <Boardroom
                 active={active}
+                animation={animation}
                 statuses={statuses}
-                verdicts={boardVerdicts}
+                verdicts={verdicts}
                 sources={sources}
-                chair={boardChair}
+                chair={chair}
                 onSelect={setSelected}
               />
             </Suspense>
@@ -656,7 +736,7 @@ export default function App() {
           {drumming && (
             <div className="drum-overlay" role="status">
               <span>● ● ●</span>
-              <h2>Council ruling</h2>
+              <h2>Warren’s ruling</h2>
               <p>The chair has the floor.</p>
             </div>
           )}
@@ -672,214 +752,146 @@ export default function App() {
             <span className="caption-line" />
             <span>EST. MMXXVI</span>
           </div>
-          <div className="member-strip">
-            {memberIds.map((member) => {
-              const signal = boardVerdicts[member]?.signal;
-              return (
-                <button
-                  key={member}
-                  onClick={() => setSelected(member)}
-                  className={active === member ? "active" : ""}
-                >
-                  <span className={`portrait-mini ${member}`} />
-                  <span>
-                    <strong>{members[member].name}</strong>
-                    <small>{members[member].role}</small>
-                  </span>
-                  <b className={`signal ${signal?.toLowerCase() || ""}`}>
-                    {signal || "Pending"}
-                  </b>
-                </button>
-              );
-            })}
-          </div>
         </section>
-        <aside className="panel" aria-label="Council chat and brief">
-          <div className="panel-scroll">
-            <div className="panel-intro">
-              <p className="eyebrow">
-                {hasResults ? "THE CONVERSATION" : "BEFORE WE BEGIN"}
+        <aside className="panel chat-panel" aria-label="Council chat">
+          <div className="chat-context">
+            <span className="context-chip" role="status">
+              {loadingContext
+                ? "Loading portfolio…"
+                : context?.label || "Portfolio unavailable"}
+            </span>
+            {!context && !loadingContext && (
+              <button
+                className="context-retry"
+                onClick={() => {
+                  const abort = new AbortController();
+                  contextController.current = abort;
+                  void loadContext(abort.signal);
+                }}
+              >
+                Retry
+              </button>
+            )}
+            <label className="attach-context" title="Replace portfolio">
+              <span aria-hidden="true">⌁</span>
+              <input
+                type="file"
+                accept=".csv,.json"
+                aria-label="Replace portfolio"
+                disabled={busy || loadingContext}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    contextController.current?.abort();
+                    const abort = new AbortController();
+                    contextController.current = abort;
+                    void loadContext(abort.signal, file);
+                  }
+                  event.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          <div
+            className="chat-messages"
+            role="log"
+            aria-label="Council messages"
+            aria-live="polite"
+          >
+            {!messages.length && (
+              <p className="chat-empty">
+                What would you like the council to consider?
               </p>
-              <h2>{hasResults ? "Ask the council" : "Your brief"}</h2>
-              <p className="muted">
-                {hasResults
-                  ? "Every perspective, in one place."
-                  : "Bring your context. Get their perspective."}
+            )}
+            {messages.map((message, index) =>
+              message.kind === "user" ? (
+                <article className="chat-message user-message" key={index}>
+                  <small>You</small>
+                  <p>{message.text}</p>
+                </article>
+              ) : message.kind === "routed" ? (
+                <p className="chat-status" key={index}>
+                  Asking{" "}
+                  {message.members
+                    .map((member) =>
+                      member === "chair"
+                        ? "the chair"
+                        : members[member].name.split(" ").pop(),
+                    )
+                    .join(" and ")}{" "}
+                  · {message.reason}
+                </p>
+              ) : message.kind === "reply" ? (
+                <article className="chat-message member-message" key={index}>
+                  <img
+                    className="chat-avatar"
+                    src={`/portraits/${message.member === "chair" ? "buffett" : message.member}.png`}
+                    alt=""
+                  />
+                  <div>
+                    <small>
+                      {message.member === "chair"
+                        ? "The chair"
+                        : members[message.member].name}
+                    </small>
+                    <p>{message.text}</p>
+                  </div>
+                </article>
+              ) : (
+                <article className="chat-message member-message" key={index}>
+                  <img
+                    className="chat-avatar"
+                    src={`/portraits/${message.kind === "chair" ? "buffett" : message.verdict.member}.png`}
+                    alt=""
+                  />
+                  <div>
+                    {message.kind === "chair" ? (
+                      <ChairRuling chair={message.chair} />
+                    ) : (
+                      <VerdictCard verdict={message.verdict} />
+                    )}
+                    <button
+                      className="reply-button"
+                      disabled={busy || !runFinished}
+                      onClick={() =>
+                        setReplyTo(
+                          message.kind === "chair"
+                            ? "buffett"
+                            : message.verdict.member,
+                        )
+                      }
+                    >
+                      Reply
+                    </button>
+                  </div>
+                </article>
+              ),
+            )}
+            {busy && (
+              <p className="chat-status" role="status">
+                {stage}
               </p>
-            </div>
-            <div className="server-notice">
-              Preview backend: market data, bank data and research may be sample
-              responses. Source availability is shown below.
-            </div>
-            {!hasResults && (
-              <form onSubmit={submit} className="brief-form">
-                <div className="section-label">
-                  <span>01 / THE CONTEXT</span>
+            )}
+            <div ref={transcriptEnd} />
+          </div>
+          <div className="chat-composer">
+            {suggestions.length > 0 && !busy && (
+              <div className="chips">
+                {suggestions.map((chip) => (
                   <button
                     type="button"
-                    className="text-button"
-                    disabled={busy || loadingDemo}
-                    onClick={() => void loadDemo()}
+                    key={chip}
+                    onClick={() => void execute(chip)}
                   >
-                    {loadingDemo ? "Loading…" : "Load demo ↗"}
+                    {chip}
                   </button>
-                </div>
-                <label className="upload-card">
-                  <span className="input-icon">↥</span>
-                  <span>
-                    <strong>{portfolio?.name || "Upload portfolio"}</strong>
-                    <small>
-                      {portfolio
-                        ? "Ready to send · replace file"
-                        : "CSV or JSON · ticker, shares, cost_basis"}
-                    </small>
-                  </span>
-                  <span>↗</span>
-                  <input
-                    type="file"
-                    accept=".csv,.json"
-                    disabled={busy}
-                    aria-label="Upload portfolio"
-                    onChange={(event) => {
-                      setPortfolio(event.target.files?.[0]);
-                      setDemo(false);
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className={`upload-card ${plaid ? "connected" : ""}`}
-                  disabled={busy}
-                  onClick={() => setPlaid(!plaid)}
-                  aria-pressed={plaid}
-                >
-                  <span className="input-icon">▥</span>
-                  <span>
-                    <strong>
-                      {plaid ? "Sandbox requested" : "Include Plaid sandbox"}
-                    </strong>
-                    <small>
-                      {plaid
-                        ? "Server will fetch sample bank data"
-                        : "Optional · no real account connection"}
-                    </small>
-                  </span>
-                  <span className="badge">SANDBOX</span>
-                </button>
-                <label className="upload-card">
-                  <span className="input-icon">▤</span>
-                  <span>
-                    <strong>{personaName || "Upload persona.md"}</strong>
-                    <small>Your goals, horizon & risk tolerance</small>
-                  </span>
-                  <span>↗</span>
-                  <input
-                    type="file"
-                    accept=".md,.txt,text/plain,text/markdown"
-                    disabled={busy}
-                    aria-label="Upload persona.md"
-                    onChange={async (event) => {
-                      const file = event.target.files?.[0];
-                      if (!file) return;
-                      try {
-                        setPersona(await file.text());
-                        setPersonaName(file.name);
-                      } catch {
-                        setError(
-                          "Could not read your profile. Type it below instead.",
-                        );
-                      }
-                    }}
-                  />
-                </label>
-                <label className="field-label" htmlFor="persona">
-                  Your profile <span>or write it here</span>
-                </label>
-                <textarea
-                  id="persona"
-                  value={persona}
-                  disabled={busy}
-                  onChange={(event) => {
-                    setPersona(event.target.value);
-                    setPersonaName("Written profile");
-                  }}
-                  required
-                  rows={2}
-                  placeholder="Goals, time horizon, risk tolerance…"
-                />
-                {demo && (
-                  <p className="demo-note">
-                    Demo loaded: teammate’s synthetic broker snapshot, the
-                    checked-in demo profile and the sandbox bank request.
-                  </p>
-                )}
-                <div className="section-label question-label">
-                  02 / THE QUESTION
-                </div>
-                <label className="field-label" htmlFor="question">
-                  What’s on your mind?
-                </label>
-                <textarea
-                  id="question"
-                  value={question}
-                  disabled={busy}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  required
-                  rows={3}
-                  placeholder="What should the council consider?"
-                />
-                <button
-                  className="primary"
-                  disabled={
-                    busy ||
-                    loadingDemo ||
-                    !portfolio ||
-                    !persona.trim() ||
-                    !question.trim()
-                  }
-                >
-                  {busy ? "Convening…" : "Convene the council"} <span>→</span>
-                </button>
-                <p className="form-footnote">Five opinions. Your decision.</p>
-              </form>
-            )}
-            {hasResults && (
-              <div className="transcript" aria-live="polite">
-                <article className="brief-summary">
-                  <p className="eyebrow">CLIENT BRIEF · SERVER RECEIPT</p>
-                  <p>{summary}</p>
-                  <blockquote>{question}</blockquote>
-                  {demo && <small>Demo snapshot · synthetic broker data</small>}
-                </article>
-                <div className="research">
-                  <h3>
-                    On the table{" "}
-                    <span>{busy ? "IN PROGRESS" : "RESEARCH"}</span>
-                  </h3>
-                  {memberIds.map((member) => (
-                    <details key={member}>
-                      <summary>
-                        <span>{members[member].name}</span>
-                        <small>{statuses[member] || "Waiting"}</small>
-                      </summary>
-                      <Sources sources={sources[member] || []} />
-                    </details>
-                  ))}
-                </div>
-                {Object.values(verdicts).map((verdict) => (
-                  <VerdictCard key={verdict.member} verdict={verdict} />
                 ))}
-                {chair && <ChairRuling chair={chair} />}
-                {conversation.map((item, i) => (
-                  <ChatMessage key={i} item={item} />
-                ))}
-                <div ref={transcriptEnd} />
               </div>
             )}
             {error && (
-              <div className="error" role="alert">
+              <p className="error" role="alert">
                 {error}
-              </div>
+              </p>
             )}
             {audioMessage && (
               <p className="audio-note" role="status">
@@ -888,121 +900,104 @@ export default function App() {
             )}
             <audio
               ref={audio}
-              controls={!!audioUrl}
+              controls={voiceAvailable && !!audioUrl}
+              onPlaying={() => {
+                if (audioMember.current)
+                  setAnimation((previous) => ({
+                    ...previous,
+                    [audioMember.current!]: "speaking",
+                  }));
+              }}
+              onEnded={() => {
+                if (audioMember.current)
+                  setAnimation((previous) => ({
+                    ...previous,
+                    [audioMember.current!]: "idle",
+                  }));
+              }}
+              onPause={() => {
+                if (audioMember.current)
+                  setAnimation((previous) => ({
+                    ...previous,
+                    [audioMember.current!]: "idle",
+                  }));
+              }}
               className={audioUrl ? "audio-player" : "hidden"}
               aria-label="Council voice playback"
             />
-            {busy && (
+
+            {replyTo && (
               <button
-                className="text-button cancel"
-                onClick={() => {
-                  audio.current?.pause();
-                  controller.current?.abort(
-                    "Council cancelled. Your inputs are preserved.",
-                  );
-                }}
+                className="reply-target"
+                onClick={() => setReplyTo(undefined)}
               >
-                Cancel session
+                To {members[replyTo].name} ×
               </button>
             )}
-            {hasResults && !busy && (
-              <form
-                className="follow-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void execute(true);
+            <form className="chat-form" onSubmit={submit}>
+              <textarea
+                id="message"
+                aria-label="Message the council"
+                placeholder="Ask the council…"
+                rows={2}
+                value={question}
+                disabled={busy}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    void execute();
+                  }
                 }}
-              >
-                <p className="eyebrow">THE FLOOR IS YOURS</p>
-                <h3>Chat with the council</h3>
-                {suggestions.length > 0 && (
-                  <div className="chips">
-                    {suggestions.map((chip) => (
-                      <button
-                        type="button"
-                        key={chip}
-                        disabled={!runFinished}
-                        onClick={() => void execute(true, chip)}
-                      >
-                        {chip}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <label className="field-label" htmlFor="follow-question">
-                  Your message
-                </label>
-                <textarea
-                  id="follow-question"
-                  value={followQuestion}
-                  onChange={(event) => setFollowQuestion(event.target.value)}
-                  required
-                  rows={2}
-                  placeholder="Ask anything · @burry to address a member"
-                />
-                <button
-                  className="primary"
-                  disabled={!runId || !followQuestion.trim() || !runFinished}
-                >
-                  Send <span>→</span>
-                </button>
-                {!runFinished && (
-                  <p className="muted">
-                    Complete a new council session before chatting.
-                  </p>
-                )}
+              />
+              {busy ? (
                 <button
                   type="button"
-                  className="text-button start-over"
+                  className="cancel-send"
+                  aria-label="Cancel session"
                   onClick={() => {
-                    setSummary("");
-                    setRunId("");
-                    setRunFinished(false);
-                    setChair(undefined);
-                    setVerdicts({});
-                    setPresented(undefined);
-                    setSources({});
-                    setStatuses({});
-                    setConversation([]);
-                    setSuggestions([]);
-                    setSelected(undefined);
-                    setError("");
-                    setAudioUrl("");
                     audio.current?.pause();
-                    setStage("Your seat is waiting.");
+                    controller.current?.abort(
+                      "Council cancelled. Your message is preserved.",
+                    );
                   }}
                 >
-                  Edit brief & start a new session ↗
+                  ■
                 </button>
-              </form>
-            )}
+              ) : (
+                <button
+                  className="send-message"
+                  aria-label="Send message"
+                  disabled={loadingContext || !context || !question.trim()}
+                >
+                  ↑
+                </button>
+              )}
+            </form>
+            <p className="chat-disclaimer">
+              Parody personas · not financial advice.
+            </p>
           </div>
         </aside>
       </main>
-      <footer>
-        <span>
-          COUNCIL <span className="brand-dot">/</span> A MEETING OF MINDS
-        </span>
-        <p>Parody personas, not financial advice.</p>
-        <span>YOUR MONEY. YOUR CALL.</span>
-      </footer>
       {selected && (
         <MemberDialog onClose={() => setSelected(undefined)}>
-          <p className="eyebrow">
-            {selected === "chair" ? "The chair" : members[selected].role}
-          </p>
-          <h2>
-            {selected === "chair" ? "Council ruling" : members[selected].name}
-          </h2>
-          {selected === "chair" && boardChair ? (
-            <ChairRuling chair={boardChair} open />
-          ) : selected === "chair" ? null : selectedVerdict ? (
+          <p className="eyebrow">{members[selected].role}</p>
+          <h2>{members[selected].name}</h2>
+          {selected === "buffett" && chair && (
+            <ChairRuling chair={chair} open />
+          )}
+          {selectedVerdict ? (
             <VerdictCard verdict={selectedVerdict} open />
-          ) : (
+          ) : selected === "buffett" && chair ? null : (
             <>
               <p className="muted">
                 {statuses[selected] ||
-                  "No verdict yet. Convene the council to begin."}
+                  "No verdict yet. Send a message to begin."}
               </p>
               <Sources sources={sources[selected] || []} />
             </>

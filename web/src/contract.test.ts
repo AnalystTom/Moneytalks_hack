@@ -166,3 +166,30 @@ describe("council event mapping", () => {
     ).toBe("BUY");
   });
 });
+
+describe("council event mapping", () => {
+  const call = (ticker: string, signal: "BUY" | "HOLD" | "SELL") => ({
+    ticker,
+    signal,
+    conviction: "high" as const,
+    rationale: "",
+  });
+  it("takes the majority call, ties going to the top-weighted name", () => {
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "HOLD"), call("C", "HOLD")],
+      }).signal,
+    ).toBe("HOLD");
+    expect(
+      toVerdict({
+        member: "burry",
+        positions: [call("A", "SELL"), call("B", "BUY")],
+      }).signal,
+    ).toBe("SELL");
+  });
+  it("leaves the signal empty when a member has no calls", () => {
+    expect(toVerdict({ member: "burry" }).signal).toBeUndefined();
+    expect(toChair({}).overall_signal).toBeUndefined();
+  });
+});

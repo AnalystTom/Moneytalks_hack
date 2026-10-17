@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import Boardroom from "./Boardroom";
-import { members, toChair, toVerdict } from "./contract";
+import { members } from "./contract";
 import type { Member, Verdict } from "./contract";
 
 type ElementProps = {
@@ -38,20 +38,6 @@ const verdict = (
 });
 
 describe("cartoon boardroom", () => {
-  it("keeps returned members and rulings with no calls pending", () => {
-    const html = renderToStaticMarkup(
-      <Boardroom
-        statuses={{}}
-        verdicts={{ buffett: toVerdict({ member: "buffett", positions: [] }) }}
-        sources={{}}
-        chair={toChair({ positions: [] })}
-        onSelect={() => {}}
-      />,
-    );
-    expect(html.match(/aria-label="Pending"/g)).toHaveLength(6);
-    expect(html).not.toContain("HOLD");
-  });
-
   it("renders all five empty seats with pending icons and the generated assets", () => {
     const html = renderToStaticMarkup(
       <Boardroom
@@ -65,15 +51,15 @@ describe("cartoon boardroom", () => {
     expect(html.match(/aria-label="Pending"/g)).toHaveLength(5);
     expect(html.match(/No verdict yet\./g)).toHaveLength(10);
     for (const member of Object.keys(members)) {
-      const portrait = members[member as Member].portrait;
-      expect(html).toContain(portrait);
-      const asset = new URL(`../public${portrait}`, import.meta.url);
+      expect(html).toContain(`/portraits/${member}.png`);
+      const asset = new URL(
+        `../public/portraits/${member}.png`,
+        import.meta.url,
+      );
       expect(existsSync(asset)).toBe(true);
-      if (portrait.endsWith(".png")) {
-        const png = readFileSync(asset);
-        expect(png.subarray(1, 4).toString()).toBe("PNG");
-        expect(png[25]).toBe(6);
-      }
+      const png = readFileSync(asset);
+      expect(png.subarray(1, 4).toString()).toBe("PNG");
+      expect(png[25]).toBe(6);
     }
     expect(html.indexOf("council-seat leopold")).toBeLessThan(
       html.indexOf("council-seat buffett"),
@@ -81,12 +67,9 @@ describe("cartoon boardroom", () => {
     expect(html.indexOf("council-seat buffett")).toBeLessThan(
       html.indexOf("council-seat dalio"),
     );
-    expect(html.indexOf("council-seat dalio")).toBeLessThan(
-      html.indexOf("council-seat burry"),
-    );
   });
 
-  it("keeps every long streamed line intact and opens the matching member details", () => {
+  it("shortens long streamed lines and opens the matching member details", () => {
     const onSelect = vi.fn();
     const longLine =
       "A long returned line with risk and allocation context. ".repeat(40);
@@ -98,13 +81,15 @@ describe("cartoon boardroom", () => {
       verdicts: {
         buffett: verdict("buffett", "HOLD", longLine),
         leopold: verdict("leopold", "BUY", longLine),
-        dalio: verdict("dalio", "BUY", longLine),
         burry: verdict("burry", "SELL", longLine),
         cramer: verdict("cramer", "HOLD", longLine),
       },
     });
     const html = renderToStaticMarkup(tree);
-    expect(html.split(`<strong>${longLine}</strong>`)).toHaveLength(6);
+    expect(html).not.toContain(longLine);
+    expect(
+      html.match(/A long returned line with risk and allocation context\./g),
+    ).toHaveLength(8);
     for (const signal of ["BUY", "HOLD", "SELL"])
       expect(html).toContain(`aria-label="${signal}"`);
     const bubbles = buttons(tree).filter(
@@ -113,14 +98,14 @@ describe("cartoon boardroom", () => {
     bubbles.forEach((bubble) => bubble.onClick!());
     expect(onSelect.mock.calls.flat()).toEqual([
       "leopold",
+      "burry",
       "buffett",
       "dalio",
-      "burry",
       "cramer",
     ]);
   });
 
-  it("renders returned status, valid source counts, and the council ruling", () => {
+  it("renders returned status, valid source counts, and Warren’s final summary", () => {
     const html = renderToStaticMarkup(
       <Boardroom
         statuses={{ leopold: "researching" }}
@@ -138,14 +123,7 @@ describe("cartoon boardroom", () => {
           dissent: [],
           actions: [],
           suggestions: [],
-          positions: [
-            {
-              ticker: "NVDA",
-              signal: "SELL",
-              conviction: "high",
-              consensus: "Returned name consensus",
-            },
-          ],
+          positions: [],
         }}
         onSelect={() => {}}
       />,
@@ -154,7 +132,6 @@ describe("cartoon boardroom", () => {
     expect(html).toContain("Reviewing 1 source…");
     expect(html).toContain("Returned final summary");
     expect(html).toContain("Council ruling");
-    expect(html).toContain("NVDA SELL");
-    expect(html).toContain("Earlier verdict");
+    expect(html).not.toContain("Earlier verdict");
   });
 });

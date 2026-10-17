@@ -1,15 +1,18 @@
+import { bubbleLine } from "./animation";
+import type { AnimationState } from "./animation";
 import { members, sourceUrl } from "./contract";
 import type { Chair, Member, Source, Verdict } from "./contract";
 
 type Props = {
   active?: Member;
+  animation?: AnimationState;
   statuses: Partial<Record<Member, string>>;
   verdicts: Partial<Record<Member, Verdict>>;
   sources: Partial<Record<Member, Source[]>>;
   chair?: Chair;
-  onSelect: (member: Member | "chair") => void;
+  onSelect: (member: Member) => void;
 };
-const seats: Member[] = ["leopold", "buffett", "dalio", "burry", "cramer"];
+const seats: Member[] = ["leopold", "burry", "buffett", "dalio", "cramer"];
 
 function SignalIcon({ signal }: { signal?: Verdict["signal"] }) {
   return (
@@ -46,6 +49,7 @@ function SignalIcon({ signal }: { signal?: Verdict["signal"] }) {
 
 export default function Boardroom({
   active,
+  animation = {},
   statuses,
   verdicts,
   sources,
@@ -57,31 +61,41 @@ export default function Boardroom({
       <div className="council-seats">
         {seats.map((member) => {
           const verdict = verdicts[member];
-          const signal = verdict?.signal;
+          const ruling = member === "buffett" ? chair : undefined;
+          const signal = ruling?.overall_signal || verdict?.signal;
           const sourceCount = (sources[member] || []).filter((source) =>
             sourceUrl(source.url),
           ).length;
-          const line =
-            verdict?.headline ||
-            statuses[member] ||
-            (sourceCount
-              ? `Reviewing ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}…`
-              : "No verdict yet.");
+          const line = bubbleLine(
+            ruling?.speech_bubble ||
+              ruling?.summary ||
+              verdict?.speech_bubble ||
+              verdict?.headline ||
+              statuses[member] ||
+              (sourceCount
+                ? `Reviewing ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}…`
+                : "No verdict yet."),
+          );
+          const pose = animation[member] || "idle";
           return (
             <article
               key={member}
-              className={`council-seat ${member} ${active === member ? "speaking" : ""}`}
+              className={`council-seat ${member} ${pose} ${active === member ? "active" : ""}`}
+              data-pose={pose}
               aria-label={members[member].name}
             >
               <button
+                key={ruling?.summary || verdict?.headline || "pending"}
                 className="speech-bubble"
                 onClick={() => onSelect(member)}
                 aria-label={`View ${members[member].name}: ${signal || "Pending"}. ${line}`}
               >
                 <SignalIcon signal={signal} />
                 <span className="bubble-copy">
-                  <small>{signal || "Pending"}</small>
-                  <strong>{line}</strong>
+                  <small>
+                    {ruling ? "Council ruling" : signal || "Pending"}
+                  </small>
+                  <span className="bubble-line">{line}</span>
                   <span className="bubble-more">View more ↗</span>
                 </span>
               </button>
@@ -90,7 +104,7 @@ export default function Boardroom({
                 onClick={() => onSelect(member)}
                 aria-label={`View ${members[member].name}`}
               >
-                <img src={members[member].portrait} alt="" />
+                <img src={`/portraits/${member}.png`} alt="" />
               </button>
               <button className="seat-label" onClick={() => onSelect(member)}>
                 <strong>{members[member].name}</strong>
@@ -100,26 +114,6 @@ export default function Boardroom({
           );
         })}
       </div>
-      {chair && (
-        <button className="ruling-banner" onClick={() => onSelect("chair")}>
-          <SignalIcon signal={chair.overall_signal} />
-          <span className="bubble-copy">
-            <small>Council ruling · the chair</small>
-            <strong>{chair.summary}</strong>
-            <span className="ruling-chips">
-              {chair.positions.slice(0, 4).map((name) => (
-                <b
-                  key={name.ticker}
-                  className={`signal ${name.signal.toLowerCase()}`}
-                >
-                  {name.ticker} {name.signal}
-                </b>
-              ))}
-            </span>
-          </span>
-          <span className="bubble-more">View more ↗</span>
-        </button>
-      )}
       <div className="table-surface" aria-hidden="true">
         <div className="curved-table" />
       </div>
