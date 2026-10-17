@@ -1,12 +1,17 @@
+import { readFileSync } from "node:fs";
 import { Children, isValidElement } from "react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { members, streamCouncil } from "./contract";
-import type { Member, Verdict } from "./contract";
+import { streamCouncil } from "./contract";
+import type { Verdict } from "./contract";
 
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], next: 0 }));
+const hooks = vi.hoisted(() => ({
+  values: [] as unknown[],
+  next: 0,
+  effects: [] as (() => unknown)[],
+}));
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof import("react")>();
   function useState(initial: unknown) {
@@ -24,7 +29,9 @@ vi.mock("react", async (importOriginal) => {
     ...react,
     useState,
     useRef: (current: unknown) => useState({ current })[0],
-    useEffect: () => {},
+    useEffect: (effect: () => unknown) => {
+      hooks.effects.push(effect);
+    },
   };
 });
 vi.mock("./contract", async (importOriginal) => ({
@@ -59,32 +66,70 @@ function submit(className: string) {
   get("className", className).onSubmit!({ preventDefault() {} });
 }
 async function idle() {
-  await vi.waitFor(() => {
-    expect(get("className", "follow-form")).toBeDefined();
-  });
+  await vi.waitFor(() =>
+    expect(get("aria-label", "Send message")).toBeDefined(),
+  );
+}
+const verdict: Verdict = {
+  member: "buffett",
+  signal: "HOLD",
+  confidence: 0.8,
+  headline: "Returned portfolio answer. More context for details.",
+  reasons: ["Returned reason"],
+  sources: [],
+  tickers: [],
+};
+async function replySession() {
+  vi.mocked(streamCouncil).mockImplementationOnce(
+    async (_, __, ___, receive) => {
+      await receive({ event: "run.started", data: { run_id: "parent" } });
+      await receive({ event: "member.verdict", data: verdict });
+      await receive({ event: "run.done", data: { run_id: "parent" } });
+    },
+  );
+  submit("chat-form");
+  await vi.advanceTimersByTimeAsync(1200);
+  get("className", "reply-button").onClick!();
+  get("id", "message").onChange!({ target: { value: "Why hold?" } });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   hooks.values = [];
   hooks.next = 0;
-  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-    Response.json({ brief_id: "brief", summary: "Portfolio received" }),
-  );
+  hooks.effects = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (input === "/demo-portfolio.json")
+      return Response.json(
+        JSON.parse(
+          readFileSync(
+            new URL("../../data/portfolio.json", import.meta.url),
+            "utf8",
+          ),
+        ),
+      );
+    if (input === "/demo-persona.md")
+      return new Response(
+        readFileSync(new URL("../../data/PERSONA.md", import.meta.url), "utf8"),
+      );
+    return Response.json({
+      brief_id: "brief",
+      summary: "Portfolio received",
+      voice: true,
+    });
+  });
   vi.mocked(streamCouncil).mockReset();
   vi.mocked(streamCouncil).mockImplementation(async (_, __, ___, receive) => {
     await receive({ event: "run.started", data: { run_id: "parent" } });
     await receive({ event: "run.done", data: { run_id: "parent" } });
   });
-  get("aria-label", "Upload portfolio").onChange!({
-    target: {
-      value: "",
-      files: [
-        new File(["ticker,shares,cost_basis\nAAPL,2,100"], "holdings.csv"),
-      ],
-    },
-  });
-  get("id", "persona").onChange!({ target: { value: "Long-term investor" } });
-  get("id", "question").onChange!({ target: { value: "Should I hold?" } });
+  get("className", "chat-form");
+  hooks.effects[0]();
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Jordan’s portfolio loaded",
+    ),
+  );
+  get("id", "message").onChange!({ target: { value: "Should I hold?" } });
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -92,18 +137,37 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it("auto-ingests the checked-in context and renders only chat with one composer", async () => {
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/ingest",
+    expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+  );
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  expect(html).toContain("Jordan’s portfolio loaded");
+  expect(html).not.toContain("brief-form");
+  expect(html).not.toContain("Upload portfolio");
+  expect(html).not.toContain("Preview backend");
+  expect(html.match(/<textarea/g)).toHaveLength(1);
+  submit("chat-form");
+  await idle();
+  expect(streamCouncil).toHaveBeenCalledWith(
+    "/api/council/run",
+    expect.objectContaining({ brief_id: "brief", question: "Should I hold?" }),
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+});
+
 it.each(["request failure", "cancellation", "stream error", "early end"])(
-  "allows another follow-up after %s without a new parent session",
+  "preserves the message and permits retry after %s",
   async (failure) => {
-    submit("brief-form");
-    await idle();
-    get("id", "follow-question").onChange!({ target: { value: "Why hold?" } });
     if (failure === "cancellation") {
       vi.mocked(streamCouncil).mockImplementationOnce(
         (_, __, signal) =>
-          new Promise<void>((_, reject) => {
-            signal.addEventListener("abort", () => reject(signal.reason));
-          }),
+          new Promise<void>((_, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason)),
+          ),
       );
     } else if (failure === "stream error") {
       vi.mocked(streamCouncil).mockImplementationOnce(
@@ -115,45 +179,133 @@ it.each(["request failure", "cancellation", "stream error", "early end"])(
           throw new Error("Unavailable");
         },
       );
-    } else {
-      vi.mocked(streamCouncil).mockRejectedValueOnce(
-        new Error(
-          failure === "early end" ? "Connection ended early" : "HTTP 503",
-        ),
-      );
+    } else vi.mocked(streamCouncil).mockRejectedValueOnce(new Error(failure));
+    submit("chat-form");
+    if (failure === "cancellation") {
+      await vi.waitFor(() => expect(streamCouncil).toHaveBeenCalledOnce());
+      get("aria-label", "Cancel session").onClick!();
     }
-    submit("follow-form");
-    if (failure === "cancellation")
-      get("className", "text-button cancel").onClick!();
     await idle();
-    expect(get("className", "primary").disabled).toBe(false);
-    expect(get("id", "follow-question").value).toBe("Why hold?");
-    submit("follow-form");
+    expect(get("id", "message").value).toBe("Should I hold?");
+    submit("chat-form");
     await idle();
-    expect(streamCouncil).toHaveBeenLastCalledWith(
-      "/api/council/ask",
-      expect.objectContaining({ run_id: "parent", question: "Why hold?" }),
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
-    expect(get("id", "follow-question").value).toBe("");
+    expect(streamCouncil).toHaveBeenCalledTimes(2);
+    expect(get("id", "message").value).toBe("");
   },
 );
 
-it("requires completion again when a new parent session fails", async () => {
-  submit("brief-form");
+it("cancels during health loading before opening a stream and permits retry", async () => {
+  let release!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      }),
+  );
+  submit("chat-form");
+  get("aria-label", "Cancel session").onClick!();
+  release(Response.json({ voice: true }));
   await idle();
-  get("className", "text-button start-over").onClick!();
+  expect(streamCouncil).not.toHaveBeenCalled();
+  submit("chat-form");
+  await idle();
+  expect(streamCouncil).toHaveBeenCalledOnce();
+});
+
+it("shows real returned answers and ruling as avatar messages with full details", async () => {
+  vi.useFakeTimers();
   vi.mocked(streamCouncil).mockImplementationOnce(
     async (_, __, ___, receive) => {
-      await receive({ event: "run.started", data: { run_id: "new-parent" } });
-      throw new Error("HTTP 503");
+      await receive({ event: "member.verdict", data: verdict });
+      await receive({
+        event: "chair.summary",
+        data: {
+          overall_signal: "HOLD",
+          summary: "Returned final ruling",
+          consensus: "Returned consensus",
+          dissent: ["Returned dissent"],
+        },
+      });
+      await receive({ event: "run.done", data: { run_id: "parent" } });
     },
   );
-  submit("brief-form");
-  await idle();
-  get("id", "follow-question").onChange!({ target: { value: "Why hold?" } });
-  expect(get("className", "primary").disabled).toBe(true);
+  submit("chat-form");
+  await vi.advanceTimersByTimeAsync(2900);
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  for (const text of [
+    "Should I hold?",
+    verdict.headline,
+    "Returned reason",
+    "Returned final ruling",
+    "Returned consensus",
+    "Returned dissent",
+    "chat-avatar",
+  ])
+    expect(html).toContain(text);
+});
+
+it("shows context failure, disables send, and retries the real loading path", async () => {
+  const fetchContext = vi.mocked(fetch).getMockImplementation()!;
+  hooks.values = [];
+  hooks.next = 0;
+  hooks.effects = [];
+  vi.mocked(fetch).mockResolvedValue(
+    new Response("Unavailable", { status: 503 }),
+  );
+  get("className", "chat-form");
+  hooks.effects[0]();
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Portfolio unavailable",
+    ),
+  );
+  expect(get("aria-label", "Send message").disabled).toBe(true);
+  expect(get("className", "error").children).toContain("unavailable");
+  vi.mocked(fetch).mockImplementation(fetchContext);
+  get("className", "context-retry").onClick!();
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Jordan’s portfolio loaded",
+    ),
+  );
+});
+
+it("clears old answers only after a replacement portfolio is accepted", async () => {
+  vi.useFakeTimers();
+  await replySession();
+  vi.useRealTimers();
+  const label = "Jordan’s portfolio loaded";
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ detail: "Invalid holdings" }, { status: 422 }),
+  );
+  const replace = () =>
+    get("aria-label", "Replace portfolio").onChange!({
+      target: {
+        value: "",
+        files: [
+          new File(["ticker,shares,cost_basis\nAAPL,2,100"], "replacement.csv"),
+        ],
+      },
+    });
+  replace();
+  await vi.waitFor(() =>
+    expect(get("className", "error").children).toBe("Invalid holdings"),
+  );
+  expect(get("className", "context-chip").children).toBe(label);
+  hooks.next = 0;
+  expect(renderToStaticMarkup(App())).toContain(verdict.headline);
+  replace();
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "replacement.csv loaded",
+    ),
+  );
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  expect(html).not.toContain(verdict.headline);
+  expect(html).not.toContain("reply-target");
+  expect(html).not.toContain("chat-avatar");
 });
 
 describe("spoken answers", () => {
@@ -199,11 +351,7 @@ describe("spoken answers", () => {
     "finishes progressing speech through pause, microtasks, then ended (follow-up: %s)",
     async (follow) => {
       if (follow) {
-        submit("brief-form");
-        await vi.advanceTimersByTimeAsync(0);
-        get("id", "follow-question").onChange!({
-          target: { value: "Why hold?" },
-        });
+        await replySession();
       }
       const player = audioPlayer();
       const speakers = follow
@@ -222,7 +370,7 @@ describe("spoken answers", () => {
           await receive({ event: "run.done", data: { run_id: "parent" } });
         },
       );
-      submit(follow ? "follow-form" : "brief-form");
+      submit("chat-form");
       await vi.advanceTimersByTimeAsync(0);
       for (let i = 0; i < speakers.length; i++) {
         expect(player.play).toHaveBeenCalledTimes(i + 1);
@@ -246,7 +394,7 @@ describe("spoken answers", () => {
         player.currentTime = 0;
       }
       expect(player.pause).toHaveBeenCalledTimes(speakers.length);
-      expect(get("className", "follow-form")).toBeDefined();
+      expect(get("aria-label", "Send message")).toBeDefined();
       expect(vi.getTimerCount()).toBe(0);
     },
   );
@@ -258,7 +406,7 @@ describe("spoken answers", () => {
       if (!started)
         player.play.mockImplementation(() => new Promise<void>(() => {}));
       spokenStream();
-      submit("brief-form");
+      submit("chat-form");
       await vi.advanceTimersByTimeAsync(0);
       if (started) {
         player.onplaying!();
@@ -274,7 +422,7 @@ describe("spoken answers", () => {
       await vi.advanceTimersByTimeAsync(5000);
       expect(player.pause).toHaveBeenCalledOnce();
       expect(get("className", "audio-note").children).toContain("timed out");
-      expect(get("className", "follow-form")).toBeDefined();
+      expect(get("aria-label", "Send message")).toBeDefined();
       expect(vi.getTimerCount()).toBe(0);
     },
   );
@@ -286,12 +434,11 @@ describe("spoken answers", () => {
       if (reason === "autoplay rejection")
         player.play.mockRejectedValue(new Error("Not allowed"));
       spokenStream();
-      submit("brief-form");
+      submit("chat-form");
       await vi.advanceTimersByTimeAsync(0);
       if (reason === "error") player.onerror!();
       if (reason === "pause") player.pause();
-      if (reason === "cancel")
-        get("className", "text-button cancel").onClick!();
+      if (reason === "cancel") get("aria-label", "Cancel session").onClick!();
       await vi.advanceTimersByTimeAsync(0);
       expect(player.pause).toHaveBeenCalled();
       if (reason === "error")
@@ -310,6 +457,48 @@ describe("spoken answers", () => {
     },
   );
 
+  it.each(["disabled", "unknown"])(
+    "never loads audio when voice capability is %s",
+    async (capability) => {
+      vi.mocked(fetch).mockImplementation(async () =>
+        Response.json({
+          brief_id: "brief",
+          summary: "Portfolio received",
+          ...(capability === "disabled" ? { voice: false } : {}),
+        }),
+      );
+      const player = audioPlayer();
+      spokenStream();
+      submit("chat-form");
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(player.play).not.toHaveBeenCalled();
+      expect(player.src).toBe("");
+      expect(get("aria-label", "Send message")).toBeDefined();
+    },
+  );
+
+  it("stops requesting voice after a playback failure", async () => {
+    const player = audioPlayer();
+    vi.mocked(streamCouncil).mockImplementationOnce(
+      async (_, __, ___, receive) => {
+        for (const member of ["leopold", "buffett"] as const)
+          await receive({
+            event: "member.audio",
+            data: { member, audio_url: `/api/voice/speak?member=${member}` },
+          });
+        await receive({ event: "run.done", data: { run_id: "parent" } });
+      },
+    );
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(0);
+    player.onerror!();
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(player.play).toHaveBeenCalledOnce();
+    expect(player.src).toContain("leopold");
+    expect(get("aria-label", "Council voice playback").controls).toBe(false);
+    expect(get("aria-label", "Send message")).toBeDefined();
+  });
+
   it("still times out a server that stops responding after speech", async () => {
     const player = audioPlayer();
     vi.mocked(streamCouncil).mockImplementationOnce(
@@ -323,7 +512,7 @@ describe("spoken answers", () => {
         });
       },
     );
-    submit("brief-form");
+    submit("chat-form");
     await vi.advanceTimersByTimeAsync(0);
     player.onended!();
     await vi.advanceTimersByTimeAsync(180000);
@@ -331,7 +520,7 @@ describe("spoken answers", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each(["timeout", "ended", "error", "pause", "cancel"])(
+  it.each(["timeout", "ended", "pause", "cancel"])(
     "ignores settled callbacks and source-replacement rejection after %s",
     async (reason) => {
       const player = audioPlayer();
@@ -368,7 +557,7 @@ describe("spoken answers", () => {
           await receive({ event: "run.done", data: { run_id: "parent" } });
         },
       );
-      submit("brief-form");
+      submit("chat-form");
       await vi.advanceTimersByTimeAsync(0);
       const previous = {
         ended: player.onended!,
@@ -379,19 +568,17 @@ describe("spoken answers", () => {
       };
       if (reason === "timeout") await vi.advanceTimersByTimeAsync(30000);
       else if (reason === "cancel")
-        get("className", "text-button cancel").onClick!();
+        get("aria-label", "Cancel session").onClick!();
       else if (reason === "ended") previous.ended();
-      else if (reason === "error") previous.error();
       else previous.pause();
       await vi.advanceTimersByTimeAsync(0);
       if (reason === "cancel") {
-        get("className", "text-button start-over").onClick!();
         spokenStream();
-        submit("brief-form");
+        submit("chat-form");
         await vi.advanceTimersByTimeAsync(0);
       }
       expect(player.play).toHaveBeenCalledTimes(2);
-      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 3 : 1);
+      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 2 : 1);
       expect(player.src).not.toContain("leopold");
       const nextEnded = player.onended;
       const nextProgress = player.ontimeupdate;
@@ -400,11 +587,9 @@ describe("spoken answers", () => {
       for (const callback of Object.values(previous)) callback();
       expect(player.onended).toBe(nextEnded);
       expect(player.ontimeupdate).toBe(nextProgress);
-      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 3 : 1);
-      if (reason === "timeout" || reason === "error")
-        expect(get("className", "audio-note").children).toContain(
-          reason === "timeout" ? "timed out" : "unavailable",
-        );
+      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 2 : 1);
+      if (reason === "timeout")
+        expect(get("className", "audio-note").children).toContain("timed out");
       else expect(() => get("className", "audio-note")).toThrow("Missing");
       player.onplaying!();
       for (let i = 0; i < 4; i++) {
@@ -412,159 +597,11 @@ describe("spoken answers", () => {
         player.currentTime += 10;
         player.ontimeupdate!();
       }
-      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 3 : 1);
+      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 2 : 1);
       player.onended!();
       await vi.advanceTimersByTimeAsync(0);
-      expect(get("className", "follow-form")).toBeDefined();
+      expect(get("aria-label", "Send message")).toBeDefined();
       expect(vi.getTimerCount()).toBe(0);
     },
   );
-});
-
-it("opens the displayed ruling or member answer, including after follow-ups", async () => {
-  vi.useFakeTimers();
-  function boardroom(node: ReactNode): Props | undefined {
-    for (const child of Children.toArray(node)) {
-      if (!isValidElement<Props>(child)) continue;
-      if (child.props.verdicts) return child.props;
-      const nested = boardroom(child.props.children);
-      if (nested) return nested;
-    }
-  }
-  function currentBoard() {
-    hooks.next = 0;
-    return boardroom(App())!;
-  }
-  function details(member: Member, signal: Verdict["signal"]) {
-    const button = Children.toArray(
-      get("className", "member-strip").children,
-    ).find(
-      (child) =>
-        isValidElement<Props>(child) &&
-        renderToStaticMarkup(child).includes(members[member].name),
-    );
-    if (!isValidElement<Props>(button))
-      throw new Error(`Missing strip button for ${member}`);
-    expect(renderToStaticMarkup(button)).toContain(
-      `<b class="signal ${signal.toLowerCase()}">${signal}</b>`,
-    );
-    button.props.onClick!();
-    hooks.next = 0;
-    const html = renderToStaticMarkup(App());
-    expect(html).toContain("<dialog");
-    const dialog = html.slice(
-      html.indexOf("<dialog"),
-      html.indexOf("</dialog>"),
-    );
-    expect(dialog).toContain(
-      `<span class="signal ${signal.toLowerCase()}">${signal}</span>`,
-    );
-    return dialog;
-  }
-  vi.mocked(streamCouncil).mockImplementationOnce(
-    async (_, __, ___, receive) => {
-      await receive({ event: "run.started", data: { run_id: "parent" } });
-      for (const member of ["buffett", "leopold", "burry", "cramer"] as const) {
-        await receive({
-          event: "member.verdict",
-          data: {
-            member,
-            signal: "BUY",
-            headline: `Returned ${member} individual verdict`,
-            confidence: 0.8,
-            reasons: ["Returned individual reason"],
-            sources: [],
-            tickers: [],
-          },
-        });
-      }
-      await receive({
-        event: "chair.summary",
-        data: {
-          overall_signal: "HOLD",
-          summary: "Returned initial chair summary",
-          consensus: "Returned consensus",
-          dissent: ["Returned dissent"],
-        },
-      });
-      await receive({ event: "run.done", data: { run_id: "parent" } });
-    },
-  );
-  submit("brief-form");
-  await vi.advanceTimersByTimeAsync(4800);
-  expect(details("buffett", "BUY")).toContain(
-    "Returned buffett individual verdict",
-  );
-  await vi.advanceTimersByTimeAsync(1700);
-  expect(currentBoard().chair).toMatchObject({
-    summary: "Returned initial chair summary",
-  });
-  const ruling = details("buffett", "HOLD");
-  for (const text of [
-    "HOLD",
-    "Returned initial chair summary",
-    "Returned consensus",
-    "Returned dissent",
-  ])
-    expect(ruling).toContain(text);
-  expect(ruling).not.toContain("BUY");
-  expect(ruling).not.toContain("individual verdict");
-  for (const member of ["leopold", "burry", "cramer"] as const) {
-    const individual = details(member, "BUY");
-    expect(individual).toContain("BUY");
-    expect(individual).toContain(`Returned ${member} individual verdict`);
-    expect(individual).toContain("Returned individual reason");
-    expect(individual).not.toContain("Returned initial chair summary");
-  }
-  for (const [member, signal] of [
-    ["buffett", "SELL"],
-    ["burry", "HOLD"],
-    ["buffett", "HOLD"],
-    ["burry", "SELL"],
-  ] as const) {
-    get("id", "member").onChange!({ target: { value: member } });
-    get("id", "follow-question").onChange!({
-      target: { value: `Why, ${member}?` },
-    });
-    vi.mocked(streamCouncil).mockImplementationOnce(
-      async (_, __, ___, receive) => {
-        await receive({
-          event: "member.verdict",
-          data: {
-            member,
-            signal,
-            headline: `Returned ${member} follow-up`,
-            confidence: 0.8,
-            reasons: [],
-            sources: [],
-            tickers: [],
-          },
-        });
-        await receive({ event: "run.done", data: { run_id: "parent" } });
-      },
-    );
-    submit("follow-form");
-    await vi.advanceTimersByTimeAsync(1200);
-    expect(details(member, signal)).toContain(`Returned ${member} follow-up`);
-  }
-  expect(currentBoard().verdicts).toMatchObject({
-    buffett: { headline: "Returned buffett follow-up", signal: "HOLD" },
-    burry: { headline: "Returned burry follow-up", signal: "SELL" },
-  });
-  expect(currentBoard().chair).toBeUndefined();
-  for (const [member, signal] of [
-    ["buffett", "HOLD"],
-    ["burry", "SELL"],
-  ] as const) {
-    const followUp = details(member, signal);
-    expect(followUp).toContain(`Returned ${member} follow-up`);
-    expect(followUp).not.toContain("Returned initial chair summary");
-    expect(followUp).not.toContain("individual verdict");
-  }
-  const transcript = renderToStaticMarkup(
-    get("className", "transcript").children,
-  );
-  for (const member of Object.keys(members))
-    expect(transcript).toContain(`Returned ${member} individual verdict`);
-  expect(transcript).toContain("Returned initial chair summary");
 });
