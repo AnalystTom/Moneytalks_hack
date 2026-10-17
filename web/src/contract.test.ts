@@ -1,0 +1,91 @@
+import { describe, expect, it } from "vitest";
+import { portfolioFile, sourceUrl, streamCouncil } from "./contract";
+import { readFileSync } from "node:fs";
+
+const encoder = new TextEncoder();
+function stream(chunks: string[]) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    }),
+  );
+}
+describe("broker upload boundary", () => {
+  it("converts the actual supplied broker snapshot using per-share entry cost", async () => {
+    const snapshot = JSON.parse(
+      readFileSync(
+        new URL("../../data/portfolio.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const output = JSON.parse(await portfolioFile(snapshot).text());
+    expect(output.holdings).toHaveLength(snapshot.positions.length);
+    expect(output.holdings[0]).toEqual({
+      ticker: snapshot.positions[0].symbol,
+      shares: snapshot.positions[0].qty,
+      cost_basis: snapshot.positions[0].avg_entry_price,
+    });
+  });
+  it("rejects malformed broker positions", () => {
+    expect(() =>
+      portfolioFile({
+        positions: [{ symbol: "X", qty: -1, avg_entry_price: 10 }],
+      }),
+    ).toThrow();
+    expect(() => portfolioFile({ positions: [] })).toThrow();
+  });
+});
+describe("source links", () => {
+  it("renders only usable HTTP source links, never the server placeholder", () => {
+    expect(sourceUrl("https://example.com/anchor-stub")).toBeUndefined();
+    expect(sourceUrl("javascript:alert(1)")).toBeUndefined();
+    expect(
+      sourceUrl("https://www.berkshirehathaway.com/letters/letters.html"),
+    ).toContain("berkshirehathaway.com");
+  });
+});
+describe("POST SSE", () => {
+  it("handles frames split across chunks and CRLF boundaries in order", async () => {
+    const prior = globalThis.fetch;
+    globalThis.fetch = async () =>
+      stream([
+        "event: run.started\r",
+        '\ndata: {"run_id":"receipt"}\r\n\r',
+        '\nevent: run.done\ndata: {"run_id":"receipt"}\n\n',
+      ]);
+    const received: string[] = [];
+    try {
+      await streamCouncil(
+        "/api/council/run",
+        {},
+        new AbortController().signal,
+        async (event) => {
+          received.push(event.event);
+        },
+      );
+    } finally {
+      globalThis.fetch = prior;
+    }
+    expect(received).toEqual(["run.started", "run.done"]);
+  });
+  it("rejects an interrupted stream instead of claiming completion", async () => {
+    const prior = globalThis.fetch;
+    globalThis.fetch = async () =>
+      stream(['event: run.started\ndata: {"run_id":"receipt"}\n\n']);
+    try {
+      await expect(
+        streamCouncil(
+          "/api/council/run",
+          {},
+          new AbortController().signal,
+          async () => {},
+        ),
+      ).rejects.toThrow("ended early");
+    } finally {
+      globalThis.fetch = prior;
+    }
+  });
+});
