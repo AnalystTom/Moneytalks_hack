@@ -209,7 +209,10 @@ export default function App() {
     player.src = parsed.href;
     if (!soundEnabled.current) return;
     await new Promise<void>((resolve) => {
+      let settled = false;
       const finish = () => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timeout);
         player.onended = null;
         player.onerror = null;
@@ -221,6 +224,7 @@ export default function App() {
         resolve();
       };
       const stalled = () => {
+        if (settled) return;
         setAudioMessage(
           "Voice playback timed out. All answers remain in the transcript.",
         );
@@ -231,20 +235,24 @@ export default function App() {
       signal.addEventListener("abort", finish, { once: true });
       player.onended = finish;
       player.onpause = finish;
-      player.onplaying = () => setAudioMessage("");
+      player.onplaying = () => {
+        if (!settled) setAudioMessage("");
+      };
       player.ontimeupdate = () => {
-        if (player.currentTime === position) return;
+        if (settled || player.currentTime === position) return;
         position = player.currentTime;
         clearTimeout(timeout);
         timeout = setTimeout(stalled, 30000);
       };
       player.onerror = () => {
+        if (settled) return;
         setAudioMessage(
           "Voice unavailable from the server. All answers remain in the transcript.",
         );
         finish();
       };
       void player.play().catch(() => {
+        if (settled) return;
         setAudioMessage(
           "Voice could not play automatically. Use the audio controls to retry.",
         );

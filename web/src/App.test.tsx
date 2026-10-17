@@ -319,4 +319,93 @@ describe("spoken answers", () => {
     expect(get("className", "error").children).toContain("timed out");
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it.each(["timeout", "ended", "error", "pause", "cancel"])(
+    "ignores settled callbacks and source-replacement rejection after %s",
+    async (reason) => {
+      const player = audioPlayer();
+      player.pause.mockImplementation(() => {});
+      let rejectFirst!: (reason: Error) => void;
+      player.play.mockImplementationOnce(
+        () =>
+          new Promise<void>((_, reject) => {
+            rejectFirst = reject;
+          }),
+      );
+      let source = "";
+      Object.defineProperty(player, "src", {
+        get: () => source,
+        set: (value: string) => {
+          const replacing = !!source;
+          source = value;
+          if (replacing)
+            queueMicrotask(() =>
+              rejectFirst(new DOMException("Source replaced", "AbortError")),
+            );
+        },
+      });
+      vi.mocked(streamCouncil).mockImplementationOnce(
+        async (_, __, signal, receive) => {
+          await receive({ event: "run.started", data: { run_id: "parent" } });
+          for (const member of ["leopold", "buffett"] as const) {
+            await receive({
+              event: "member.audio",
+              data: { member, audio_url: `/api/voice/speak?member=${member}` },
+            });
+            signal.throwIfAborted();
+          }
+          await receive({ event: "run.done", data: { run_id: "parent" } });
+        },
+      );
+      submit("brief-form");
+      await vi.advanceTimersByTimeAsync(0);
+      const previous = {
+        ended: player.onended!,
+        pause: player.onpause!,
+        playing: player.onplaying!,
+        progress: player.ontimeupdate!,
+        error: player.onerror!,
+      };
+      if (reason === "timeout") await vi.advanceTimersByTimeAsync(30000);
+      else if (reason === "cancel")
+        get("className", "text-button cancel").onClick!();
+      else if (reason === "ended") previous.ended();
+      else if (reason === "error") previous.error();
+      else previous.pause();
+      await vi.advanceTimersByTimeAsync(0);
+      if (reason === "cancel") {
+        get("className", "text-button start-over").onClick!();
+        spokenStream();
+        submit("brief-form");
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(player.play).toHaveBeenCalledTimes(2);
+      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 3 : 1);
+      expect(player.src).not.toContain("leopold");
+      const nextEnded = player.onended;
+      const nextProgress = player.ontimeupdate;
+      expect(nextEnded).toBeTypeOf("function");
+      player.currentTime = 1;
+      for (const callback of Object.values(previous)) callback();
+      expect(player.onended).toBe(nextEnded);
+      expect(player.ontimeupdate).toBe(nextProgress);
+      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 3 : 1);
+      if (reason === "timeout" || reason === "error")
+        expect(get("className", "audio-note").children).toContain(
+          reason === "timeout" ? "timed out" : "unavailable",
+        );
+      else expect(() => get("className", "audio-note")).toThrow("Missing");
+      player.onplaying!();
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(10000);
+        player.currentTime += 10;
+        player.ontimeupdate!();
+      }
+      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 3 : 1);
+      player.onended!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(get("className", "follow-form")).toBeDefined();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 });
