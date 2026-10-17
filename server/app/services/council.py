@@ -6,8 +6,6 @@ import uuid
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
-from pydantic import ValidationError
-
 from app.models import Chair, Verdict
 from app.services import agents, elevenlabs, llm, personas, prism
 from app.services.prism import Trace
@@ -27,14 +25,14 @@ def audio_url(member: str, text: str) -> str:
 
 def _context(brief: dict, question: str, roast: bool) -> str:
     style = "ROAST MODE: only the tone changes; tease the client and the members, keep the signal and reasoning honest.\n" if roast else ""
-    return f"{style}Client brief: {brief['summary']}\nClient profile: {brief.get('persona') or ''}\nClient question: {question}"
+    return f"{style}Client brief: {brief['summary']}\nClient profile: {brief.get('persona') or ''}\nHoldings: {json.dumps(brief['holdings'])}\nClient question: {question}"
 
 
 async def _assign(orch: Trace, brief: dict, question: str, roast: bool) -> dict[str, str]:
     """The chair's research assignment per member; a failure here only costs the members their personalised brief."""
     ps = personas.load()
     members = [{"member": p.member, "name": p.name, "role": p.role, "lens": p.body[:700]} for p in ps.values()]
-    user = f"ASSIGNMENT PHASE\n{_context(brief, question, roast)}\nHoldings: {json.dumps(brief['holdings'])}\nMembers: {json.dumps(members)}"
+    user = f"ASSIGNMENT PHASE\n{_context(brief, question, roast)}\nMembers: {json.dumps(members)}"
     messages = [{"role": "system", "content": personas.prompt("orchestrator")}, {"role": "user", "content": user}]
     with orch.span("orchestrator.assign", "llm", user) as span:
         try:
@@ -49,14 +47,6 @@ async def _assign(orch: Trace, brief: dict, question: str, roast: bool) -> dict[
             return {}
 
 
-def _tally(verdicts: dict[str, Verdict], roast: bool) -> Chair:
-    signals = [v.signal for v in verdicts.values()]
-    overall = max(set(signals), key=signals.count)
-    dissent = [f"{m}: {v.signal}" for m, v in verdicts.items() if v.signal != overall]
-    text = "Order, order. " + ("The council roasts you equally. " if roast else "") + f"Overall: {overall}."
-    return Chair(overall_signal=overall, consensus=f"{signals.count(overall)} of {len(signals)} say {overall}", dissent=dissent, summary=text)
-
-
 async def _rule(orch: Trace, brief: dict, question: str, roast: bool, verdicts: dict[str, Verdict]) -> Chair:
     chair = personas.chair()
     system = f"{personas.prompt('orchestrator')}\n\n---\n\n{chair.body}"
@@ -66,11 +56,12 @@ async def _rule(orch: Trace, brief: dict, question: str, roast: bool, verdicts: 
             result = await llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}])
             span.llm(result)
             span.output = result["message"].get("content") or ""
-            return Chair(**llm.extract_json(span.output))
-        except (ValueError, ValidationError) as e:
-            log.warning("chair ruling unusable, falling back to a tally: %s", e)
-            span.error = str(e)
-            return _tally(verdicts, roast)
+            ruling = Chair(**llm.extract_json(span.output))
+            if not ruling.consensus.strip() or not ruling.summary.strip():
+                raise ValueError("the chair returned blank ruling text")
+            return ruling
+        except (ValueError, TypeError, KeyError) as e:
+            raise ValueError("Council ruling unavailable: the chair returned an unusable response") from e
 
 
 async def _member(persona, run_id: str, brief: dict, question: str, roast: bool, assignment: str, emit, orch: Trace,

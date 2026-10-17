@@ -291,16 +291,44 @@ def test_worker_must_research_before_returning_verdict(client, brief_id, fake, m
     assert not any(e == "member.verdict" for e, _ in events)
 
 
-def test_both_chair_calls_receive_full_uploaded_profile(client, fake):
+def test_both_chair_calls_receive_full_uploaded_profile_and_holdings(client, fake):
     profile = "# Client\n" + "Long horizon. " * 100 + "\nNeed all this money next month."
+    holdings = [{"ticker": "PLTR", "shares": 17, "cost_basis": 68.9}, {"ticker": "VOO", "shares": 1, "cost_basis": 10}]
     response = client.post("/api/ingest", files={
-        "portfolio": ("p.csv", b"ticker,shares,cost_basis\nVOO,1,10\n"),
+        "portfolio": ("p.json", json.dumps(holdings).encode()),
         "persona": ("p.md", profile.encode()),
     })
-    assert run(client, response.json()["brief_id"])[-1][0] == "run.done"
+    question = "How many PLTR shares should I trim?"
+    events = parse_sse(client.post("/api/council/run", json={"brief_id": response.json()["brief_id"], "question": question}).text)
+    assert events[-1][0] == "run.done"
     chair_calls = [messages for _, messages, specs in fake.calls if specs is None]
     assert len(chair_calls) == 2
-    assert all(profile in messages[1]["content"] for messages in chair_calls)
+    for messages in chair_calls:
+        prompt = messages[1]["content"]
+        assert profile in prompt and question in prompt
+        assert prompt.count("\nHoldings: ") == 1
+        assert json.loads(prompt.split("\nHoldings: ")[1].split("\nClient question: ")[0]) == holdings
+
+
+@pytest.mark.parametrize("content", [
+    "not JSON", "{", "{}",
+    json.dumps({**CHAIR, "overall_signal": "MAYBE"}),
+    json.dumps({**CHAIR, "consensus": ""}),
+    json.dumps({**CHAIR, "summary": "   "}),
+])
+def test_unusable_chair_ruling_returns_error(client, brief_id, fake, monkeypatch, content):
+    real = fake.chat
+
+    async def malformed(messages, tools=None, max_tokens=4096):
+        if "RULING PHASE" in messages[1]["content"]:
+            return fake._result({"role": "assistant", "content": content})
+        return await real(messages, tools, max_tokens)
+
+    monkeypatch.setattr(llm, "chat", malformed)
+    events = run(client, brief_id)
+    assert sum(e == "member.verdict" for e, _ in events) == 5
+    assert events[-1] == ("run.error", {"message": "Council ruling unavailable: the chair returned an unusable response"})
+    assert not any(e in ("chair.summary", "member.audio", "run.done") for e, _ in events)
 
 
 @pytest.mark.parametrize("nested,encoded", [(False, False), (False, True), (True, False), (True, True)])
