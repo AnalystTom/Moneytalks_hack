@@ -2,7 +2,7 @@
 
 Implements the spec's server-to-scene contract. With no `NICRRON_API_KEY` it streams deterministic canned
 events, so the frontend can build against it with no keys. Anchor search, Plaid and market data are stubs
-behind `app/services/`; PRISM tracing no-ops without `PRISMTRACE_API_KEY`.
+behind `app/services/`; PRISM tracing and Knowledge Base search no-op without `PRISMTRACE_API_KEY`. See [docs/prism.md](../docs/prism.md) for the PRISM proofs; `scripts/kb_seed.py` uploads the per-member Knowledge Base and `scripts/seed_runs.py` seeds runs.
 
 ## Run
 
@@ -52,6 +52,7 @@ Copy `../.env.example` to `../.env`. All optional.
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_CRAMER` / `_BURRY` / `_LEOPOLD` | `/api/voice/speak`; 503 until the key and that member's voice id are set |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
 | `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | PRISM trace + span per member |
+| `COUNCIL_VERSION` | `v1` turns PRISM Knowledge Base retrieval off (the pre-KB backend, used to seed the PRISM comparison); default `v2`. Local only, not uploaded as a Worker secret |
 | `CORS_ORIGINS` | comma-separated, default `*` |
 | `ANCHOR_API_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET` | reserved for the stubs; unused today |
 

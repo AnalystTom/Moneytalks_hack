@@ -6,13 +6,17 @@ import uuid
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
-from app.config import COUNCIL_DIR, MEMBERS
+from app.config import COUNCIL_DIR, MEMBERS, council_version
 from app.models import Chair, Source, Verdict
-from app.services import anchor, llm, prism
+from app.services import anchor, grounding, llm, prism
 
 log = logging.getLogger(__name__)
 
 RUNS: dict[str, dict] = {}  # run_id -> {"brief", "question", "roast"}; in-memory, see ingest.BRIEFS
+GROUNDING_RULE = (
+    " Every number, price, percentage and date in your reply must appear verbatim in the client brief or the provided sources; "
+    "do not compute new figures or propose amounts (say 'a fixed monthly amount', not '$500'). If a figure is not provided, say so."
+)
 PARALLEL = [m for m in MEMBERS if m != "buffett"]
 
 CANNED = {
@@ -58,7 +62,8 @@ async def _verdict(member: str, brief: dict, question: str, roast: bool, sources
     system = (
         f"You are this council member:\n{_persona(member)}\n"
         'Reply with only a JSON object: {"signal":"BUY|HOLD|SELL","confidence":0-1,"headline":str,"reasons":[2-3 str],'
-        '"tickers":[str],"sources":[{"title","url","quote"}]}. Cite ONLY the provided sources; never invent a number or quote.'
+        '"tickers":[str],"sources":[{"title","url","quote"}]}. Cite ONLY the provided sources; never invent a number or quote. Keep every string under 40 words.'
+        + ("" if council_version() == "v1" else GROUNDING_RULE)
     )
     user = _context(brief, question, roast) + f"\nSources: {json.dumps([s.model_dump() for s in sources])}"
     return Verdict(**await llm.complete_json(system, user))
@@ -84,11 +89,25 @@ async def _member(member: str, run_id: str, brief: dict, question: str, roast: b
     """Research -> think -> verdict -> speak, emitting events through `emit`."""
     await emit("member.status", {"member": member, "status": "researching"})
     sources = await anchor.search(member, question)
+    kb = [] if council_version() == "v1" else await prism.kb_search(f"council.{member}", question)
+    sources += [Source(title=r["doc_name"], url=f"prism-kb://{r['doc_name']}", quote=r["content"][:1200]) for r in kb]
     for s in sources:
         await emit("member.source", {"member": member, "title": s.title, "url": s.url})
     await emit("member.status", {"member": member, "status": "thinking"})
-    verdict = await _verdict(member, brief, question, roast, sources)
-    await prism.span(run_id, f"council.{member}", "agent", question, verdict.headline)
+    context = _context(brief, question, roast)
+    steps = [
+        ("anchor.search", "tool", question, json.dumps([s.model_dump() for s in sources if s.url.startswith("http")])),
+        ("kb.search", "retrieval", question, "\n\n".join(f"[{r['doc_name']}] {r['content'][:1200]}" for r in kb) or "nothing retrieved"),
+    ]
+    try:
+        verdict = await _verdict(member, brief, question, roast, sources)
+    except Exception as e:  # failed runs are traced too, so PRISM can cluster them
+        await prism.trace(run_id, f"council.{member}", context, f"error: {e}", steps, ok=False)
+        raise
+    answer = f"{verdict.signal}: {verdict.headline}. " + " ".join(verdict.reasons) + " Quotes: " + " | ".join(s.quote for s in verdict.sources)
+    bad = grounding.ungrounded(answer, context, " ".join(s.quote for s in sources))
+    steps.append(("grounding.check", "guardrail", answer, f"ungrounded figures: {', '.join(f'{b:g}' for b in bad)}" if bad else "every figure is in the client file or sources"))
+    await prism.trace(run_id, f"council.{member}", context, answer, steps, ok=not bad)
     await emit("member.verdict", {"member": member, **verdict.model_dump()})
     return verdict
 
