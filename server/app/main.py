@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import env
-from app.routers import council, health, ingest, voice
+from app.routers import council, health, ingest, plaid, voice
 
 app = FastAPI(title="Council")
 app.add_middleware(CORSMiddleware, allow_origins=env("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
-for r in (health, ingest, council, voice):
+for r in (health, ingest, council, voice, plaid):
     app.include_router(r.router, prefix="/api")
