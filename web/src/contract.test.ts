@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { portfolioFile, sourceUrl, streamCouncil } from "./contract";
+import {
+  ingestPortfolio,
+  portfolioFile,
+  sourceUrl,
+  streamCouncil,
+} from "./contract";
 import { readFileSync } from "node:fs";
 
 const encoder = new TextEncoder();
@@ -21,13 +26,33 @@ describe("broker upload boundary", () => {
         "utf8",
       ),
     );
-    const output = JSON.parse(await portfolioFile(snapshot).text());
+    const uploaded = new File([JSON.stringify(snapshot)], "portfolio.JSON");
+    const output = JSON.parse(await (await ingestPortfolio(uploaded)).text());
     expect(output.holdings).toHaveLength(snapshot.positions.length);
     expect(output.holdings[0]).toEqual({
       ticker: snapshot.positions[0].symbol,
       shares: snapshot.positions[0].qty,
       cost_basis: snapshot.positions[0].avg_entry_price,
     });
+  });
+  it.each([
+    ["portfolio.csv", "ticker,shares,cost_basis\nAAPL,2,100\n"],
+    [
+      "portfolio.json",
+      '{"holdings":[{"ticker":"AAPL","shares":2,"cost_basis":100}]}',
+    ],
+    ["portfolio.json", '[{"ticker":"AAPL","shares":2,"cost_basis":100}]'],
+  ])("preserves supported holdings in %s", async (name, contents) => {
+    const uploaded = new File([contents], name);
+    expect(await ingestPortfolio(uploaded)).toBe(uploaded);
+  });
+  it("rejects invalid JSON and malformed uploaded broker positions", async () => {
+    await expect(
+      ingestPortfolio(new File(["{"], "portfolio.json")),
+    ).rejects.toThrow();
+    await expect(
+      ingestPortfolio(new File(['{"positions":[]}'], "portfolio.json")),
+    ).rejects.toThrow("no positions");
   });
   it("rejects malformed broker positions", () => {
     expect(() =>

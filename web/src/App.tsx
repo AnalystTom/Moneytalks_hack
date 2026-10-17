@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   apiError,
+  ingestPortfolio,
   members,
   portfolioFile,
   sourceUrl,
@@ -345,7 +346,7 @@ export default function App() {
     setBusy(true);
     setError("");
     setAudioMessage("");
-    setRunFinished(false);
+    if (!follow) setRunFinished(false);
     unlockSound();
     try {
       if (follow) {
@@ -379,7 +380,7 @@ export default function App() {
         setSelected(undefined);
         setStage("Preparing your client brief…");
         const form = new FormData();
-        form.append("portfolio", portfolio);
+        form.append("portfolio", await ingestPortfolio(portfolio));
         form.append(
           "persona",
           new File([persona], "persona.md", { type: "text/markdown" }),
@@ -844,6 +845,7 @@ export default function App() {
                   onClick={() => {
                     setSummary("");
                     setRunId("");
+                    setRunFinished(false);
                     setChair(undefined);
                     setVerdicts({});
                     setPresented(undefined);

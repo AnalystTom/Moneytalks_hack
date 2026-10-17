@@ -91,6 +91,15 @@ export function portfolioFile(value: unknown): File {
   });
 }
 
+export async function ingestPortfolio(file: File): Promise<File> {
+  if (file.name.toLowerCase().endsWith(".json")) {
+    const value: unknown = JSON.parse(await file.text());
+    if (typeof value === "object" && value !== null && "positions" in value)
+      return portfolioFile(value);
+  }
+  return file;
+}
+
 export async function apiError(response: Response): Promise<Error> {
   const body = await response.json().catch(() => null);
   return new Error(
