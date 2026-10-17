@@ -8,7 +8,7 @@ import os
 import asgi
 from workers import DurableObject, WorkerEntrypoint
 
-# Names app.config reads; keep in sync with ../.env.example.
+# Environment bindings consumed by app settings.
 ENV_NAMES = (
     "CORS_ORIGINS", "NICRRON_API_KEY", "NICRRON_MODEL", "PRISMTRACE_API_KEY", "PRISMTRACE_PROJECT_ID",
     "PRISMTRACE_ORG_ID", "PRISMTRACE_HOST", "ELEVENLABS_API_KEY", "ELEVENLABS_MODEL", "ANCHOR_API_KEY", "PLAID_CLIENT_ID", "PLAID_SECRET",
