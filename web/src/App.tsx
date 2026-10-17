@@ -67,6 +67,33 @@ function VerdictCard({
   );
 }
 
+function ChairRuling({ chair }: { chair: Chair }) {
+  return (
+    <article className="ruling">
+      <p className="eyebrow">THE CHAIR’S FINAL WORD</p>
+      <div className="card-top">
+        <h2>Warren’s ruling</h2>
+        <span className={`signal ${chair.overall_signal.toLowerCase()}`}>
+          {chair.overall_signal}
+        </span>
+      </div>
+      <p>{chair.summary}</p>
+      <h4>Consensus</h4>
+      <p>{chair.consensus}</p>
+      <h4>Dissent</h4>
+      {chair.dissent.length ? (
+        <ul>
+          {chair.dissent.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>No dissent returned.</p>
+      )}
+    </article>
+  );
+}
+
 function MemberDialog({
   children,
   onClose,
@@ -746,32 +773,7 @@ export default function App() {
                 {Object.values(verdicts).map((verdict) => (
                   <VerdictCard key={verdict.member} verdict={verdict} />
                 ))}
-                {chair && (
-                  <article className="ruling">
-                    <p className="eyebrow">THE CHAIR’S FINAL WORD</p>
-                    <div className="card-top">
-                      <h2>Warren’s ruling</h2>
-                      <span
-                        className={`signal ${chair.overall_signal.toLowerCase()}`}
-                      >
-                        {chair.overall_signal}
-                      </span>
-                    </div>
-                    <p>{chair.summary}</p>
-                    <h4>Consensus</h4>
-                    <p>{chair.consensus}</p>
-                    <h4>Dissent</h4>
-                    {chair.dissent.length ? (
-                      <ul>
-                        {chair.dissent.map((item, i) => (
-                          <li key={i}>{item}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>No dissent returned.</p>
-                    )}
-                  </article>
-                )}
+                {chair && <ChairRuling chair={chair} />}
                 {conversation.map((item, i) => (
                   <div key={i} className="follow-entry">
                     <p className="user-question">
@@ -908,7 +910,9 @@ export default function App() {
         <MemberDialog onClose={() => setSelected(undefined)}>
           <p className="eyebrow">{members[selected].role}</p>
           <h2>{members[selected].name}</h2>
-          {selectedVerdict ? (
+          {selected === "buffett" && boardChair ? (
+            <ChairRuling chair={boardChair} />
+          ) : selectedVerdict ? (
             <VerdictCard verdict={selectedVerdict} open />
           ) : (
             <>
