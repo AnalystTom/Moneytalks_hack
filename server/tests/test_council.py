@@ -72,3 +72,38 @@ def test_run_with_nicrron_mocked(client, brief_id, monkeypatch):
     assert names(events)[-1] == "run.done"
     assert next(d for e, d in events if e == "chair.summary")["overall_signal"] == "SELL"
     assert next(d for e, d in events if e == "member.verdict")["headline"] == "h"
+
+
+def run_sources(client, brief_id, monkeypatch, version):
+    from app.services import prism
+
+    async def kb_search(agent_id, query, limit=3):
+        return [{"doc_name": "letter.md", "content": "book value fell 9.6%"}]
+
+    traces = []
+
+    async def trace(session_id, agent_id, input_text, output_text, steps, ok=True):
+        traces.append((agent_id, steps))
+
+    monkeypatch.setattr(prism, "kb_search", kb_search)
+    monkeypatch.setattr(prism, "trace", trace)
+    monkeypatch.setenv("COUNCIL_VERSION", version)
+    client.post("/api/council/run", json={"brief_id": brief_id, "question": "q"})
+    return traces
+
+
+def test_v2_retrieves_from_knowledge_base_and_traces_it(client, brief_id, monkeypatch):
+    traces = run_sources(client, brief_id, monkeypatch, "v2")
+    assert sorted(a for a, _ in traces) == ["council.buffett", "council.burry", "council.cramer", "council.leopold"]
+    assert all(steps[1][:3] == ("kb.search", "retrieval", "q") and "book value fell 9.6%" in steps[1][3] for _, steps in traces)
+
+
+def test_v1_skips_knowledge_base(client, brief_id, monkeypatch):
+    assert all(steps[1][3] == "nothing retrieved" for _, steps in run_sources(client, brief_id, monkeypatch, "v1"))
+
+
+def test_ungrounded_figures():
+    from app.services.grounding import ungrounded
+
+    assert ungrounded("Book value fell 9.6% to $70,530 in 2008", "fell 9.6% ... 70,530 ... 2008") == []
+    assert ungrounded("The S&P lost 38.5% in 2008", "fell 9.6% in 2008") == [38.5]

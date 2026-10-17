@@ -72,7 +72,7 @@ async def speak(member: str, text: str) -> bytes:
         output = str(exc)
         raise
     finally:
-        await prism.span(uuid.uuid4().hex, "voice.speak", "tool", text, output, ok, model=model)
+        await prism.trace(uuid.uuid4().hex, "voice.speak", text, output, [], ok, model=model, span_type="tool")
 
 
 async def transcribe(audio: bytes, content_type: str) -> str:
@@ -101,4 +101,4 @@ async def transcribe(audio: bytes, content_type: str) -> str:
         output = str(exc)
         raise
     finally:
-        await prism.span(uuid.uuid4().hex, "voice.transcribe", "tool", f"{len(audio)} bytes ({content_type})", output, ok, model="scribe_v2")
+        await prism.trace(uuid.uuid4().hex, "voice.transcribe", f"{len(audio)} bytes ({content_type})", output, [], ok, model="scribe_v2", span_type="tool")

@@ -91,7 +91,7 @@ def test_speech_rejects_whitespace_before_provider_call(client, eleven):
 def test_transcription_uses_scribe_and_records_actual_result(client, eleven, monkeypatch):
     traces = []
 
-    async def span(*args, **kwargs):
+    async def trace(*args, **kwargs):
         traces.append((args, kwargs))
 
     def handler(request):
@@ -100,12 +100,14 @@ def test_transcription_uses_scribe_and_records_actual_result(client, eleven, mon
         assert b"scribe_v2" in request.content and b"recorded-audio" in request.content
         return httpx.Response(200, json={"text": " What changed? "})
 
-    monkeypatch.setattr(elevenlabs.prism, "span", span)
+    monkeypatch.setattr(elevenlabs.prism, "trace", trace)
     mock_elevenlabs(monkeypatch, handler)
     response = client.post("/api/voice/transcribe", files={"file": ("question", b"recorded-audio", "audio/webm;codecs=opus")})
     assert response.json() == {"text": "What changed?"}
-    assert traces[0][0][1:3] == ("voice.transcribe", "tool")
-    assert traces[0][0][4:6] == ("What changed?", True)
+    assert traces[0][0][1] == "voice.transcribe"
+    assert traces[0][1]["span_type"] == "tool"
+    assert traces[0][0][3] == "What changed?"
+    assert traces[0][0][5] is True
     assert traces[0][1]["model"] == "scribe_v2"
 
 
@@ -132,12 +134,29 @@ def test_transcription_without_key_is_explicit(client):
 def test_transcription_provider_error_is_traced_without_leaking_response(client, eleven, monkeypatch):
     traces = []
 
-    async def span(*args, **kwargs):
+    async def trace(*args, **kwargs):
         traces.append(args)
 
-    monkeypatch.setattr(elevenlabs.prism, "span", span)
+    monkeypatch.setattr(elevenlabs.prism, "trace", trace)
     mock_elevenlabs(monkeypatch, lambda _: httpx.Response(401, text="private upstream detail"))
     response = client.post("/api/voice/transcribe", files={"file": ("question", b"audio", "audio/webm")})
     assert response.status_code == 502
     assert "private" not in response.text
     assert traces[0][5] is False
+
+
+async def test_voice_trace_uses_current_prism_helper_and_actual_model(monkeypatch):
+    monkeypatch.setenv("PRISMTRACE_API_KEY", "test-key")
+    monkeypatch.setenv("PRISMTRACE_PROJECT_ID", "test-project")
+    calls = []
+
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    mock_elevenlabs(monkeypatch, handler)
+    await elevenlabs.prism.trace("session", "voice.transcribe", "audio metadata", "question", [], model="scribe_v2", span_type="tool")
+    assert calls[0]["model"] == "scribe_v2"
+    assert calls[0]["agent_name"] == "voice.transcribe"
+    assert calls[1]["spans"][0]["span_type"] == "tool"
+    assert calls[1]["spans"][0]["output_text"] == "question"
