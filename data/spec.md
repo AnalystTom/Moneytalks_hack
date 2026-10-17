@@ -18,7 +18,7 @@ Not financial advice: the UI shows a persistent "parody personas, not financial 
    - Demo shortcut: "Load Alex" prefills all three (portfolio $10,000 in an S&P 500 ETF, down 30%; Plaid sandbox account; Alex's `persona.md`).
    - Alex asks: "I'm down 30%. Keep dollar-cost averaging, sell, or move somewhere else?"
 2. **Ingest.** The server merges the three sources into one client brief and shows a one-line summary in chat ("$10k in VOO, -30%; $4.2k cash; 10-year horizon, moderate risk").
-3. **Council researches.** All four members research in parallel; each seat shows its live searches and sources.
+3. **Council researches.** All four members research in parallel; each speech bubble shows the member's current status, or a count of available sources when no status has arrived. Select a member to view source links in expanded details.
 4. **Verdicts.** Members reveal one by one: signal, confidence, headline, 2-3 reasons, cited sources.
    - Buffett - fundamentals
    - Cramer - trend following
