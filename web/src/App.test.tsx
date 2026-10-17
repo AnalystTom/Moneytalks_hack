@@ -423,6 +423,7 @@ describe("spoken answers", () => {
 
 it("opens the displayed ruling or member answer, including after follow-ups", async () => {
   vi.useFakeTimers();
+  const memberIds = Object.keys(members) as Member[];
   function boardroom(node: ReactNode): Props | undefined {
     for (const child of Children.toArray(node)) {
       if (!isValidElement<Props>(child)) continue;
@@ -464,7 +465,7 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
   vi.mocked(streamCouncil).mockImplementationOnce(
     async (_, __, ___, receive) => {
       await receive({ event: "run.started", data: { run_id: "parent" } });
-      for (const member of ["buffett", "leopold", "burry", "cramer"] as const) {
+      for (const member of memberIds) {
         await receive({
           event: "member.verdict",
           data: {
@@ -491,7 +492,7 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
     },
   );
   submit("brief-form");
-  await vi.advanceTimersByTimeAsync(4800);
+  await vi.advanceTimersByTimeAsync(memberIds.length * 1200);
   expect(details("buffett", "BUY")).toContain(
     "Returned buffett individual verdict",
   );
@@ -509,7 +510,7 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
     expect(ruling).toContain(text);
   expect(ruling).not.toContain("BUY");
   expect(ruling).not.toContain("individual verdict");
-  for (const member of ["leopold", "burry", "cramer"] as const) {
+  for (const member of memberIds.filter((member) => member !== "buffett")) {
     const individual = details(member, "BUY");
     expect(individual).toContain("BUY");
     expect(individual).toContain(`Returned ${member} individual verdict`);
@@ -564,7 +565,7 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
   const transcript = renderToStaticMarkup(
     get("className", "transcript").children,
   );
-  for (const member of Object.keys(members))
+  for (const member of memberIds)
     expect(transcript).toContain(`Returned ${member} individual verdict`);
   expect(transcript).toContain("Returned initial chair summary");
 });
