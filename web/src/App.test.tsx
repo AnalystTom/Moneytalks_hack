@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { streamCouncil } from "./contract";
+import { members, streamCouncil } from "./contract";
+import type { Member, Verdict } from "./contract";
 
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], next: 0 }));
 vi.mock("react", async (importOriginal) => {
@@ -37,7 +38,6 @@ type Props = {
   ref?: { current: unknown };
   disabled?: boolean;
   onClick?: () => void;
-  onSelect?: (member: string) => void;
   onSubmit?: (event: { preventDefault: () => void }) => void;
   onChange?: (event: { target: { value: string; files?: File[] } }) => void;
 };
@@ -435,12 +435,31 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
     hooks.next = 0;
     return boardroom(App())!;
   }
-  function details(member: string) {
-    currentBoard().onSelect!(member);
+  function details(member: Member, signal: Verdict["signal"]) {
+    const button = Children.toArray(
+      get("className", "member-strip").children,
+    ).find(
+      (child) =>
+        isValidElement<Props>(child) &&
+        renderToStaticMarkup(child).includes(members[member].name),
+    );
+    if (!isValidElement<Props>(button))
+      throw new Error(`Missing strip button for ${member}`);
+    expect(renderToStaticMarkup(button)).toContain(
+      `<b class="signal ${signal.toLowerCase()}">${signal}</b>`,
+    );
+    button.props.onClick!();
     hooks.next = 0;
     const html = renderToStaticMarkup(App());
     expect(html).toContain("<dialog");
-    return html.slice(html.indexOf("<dialog"), html.indexOf("</dialog>"));
+    const dialog = html.slice(
+      html.indexOf("<dialog"),
+      html.indexOf("</dialog>"),
+    );
+    expect(dialog).toContain(
+      `<span class="signal ${signal.toLowerCase()}">${signal}</span>`,
+    );
+    return dialog;
   }
   vi.mocked(streamCouncil).mockImplementationOnce(
     async (_, __, ___, receive) => {
@@ -472,11 +491,15 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
     },
   );
   submit("brief-form");
-  await vi.advanceTimersByTimeAsync(6500);
+  await vi.advanceTimersByTimeAsync(4800);
+  expect(details("buffett", "BUY")).toContain(
+    "Returned buffett individual verdict",
+  );
+  await vi.advanceTimersByTimeAsync(1700);
   expect(currentBoard().chair).toMatchObject({
     summary: "Returned initial chair summary",
   });
-  const ruling = details("buffett");
+  const ruling = details("buffett", "HOLD");
   for (const text of [
     "HOLD",
     "Returned initial chair summary",
@@ -486,14 +509,19 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
     expect(ruling).toContain(text);
   expect(ruling).not.toContain("BUY");
   expect(ruling).not.toContain("individual verdict");
-  for (const member of ["leopold", "burry", "cramer"]) {
-    const individual = details(member);
+  for (const member of ["leopold", "burry", "cramer"] as const) {
+    const individual = details(member, "BUY");
     expect(individual).toContain("BUY");
     expect(individual).toContain(`Returned ${member} individual verdict`);
     expect(individual).toContain("Returned individual reason");
     expect(individual).not.toContain("Returned initial chair summary");
   }
-  for (const member of ["buffett", "burry"] as const) {
+  for (const [member, signal] of [
+    ["buffett", "SELL"],
+    ["burry", "HOLD"],
+    ["buffett", "HOLD"],
+    ["burry", "SELL"],
+  ] as const) {
     get("id", "member").onChange!({ target: { value: member } });
     get("id", "follow-question").onChange!({
       target: { value: `Why, ${member}?` },
@@ -504,7 +532,7 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
           event: "member.verdict",
           data: {
             member,
-            signal: "HOLD",
+            signal,
             headline: `Returned ${member} follow-up`,
             confidence: 0.8,
             reasons: [],
@@ -517,16 +545,26 @@ it("opens the displayed ruling or member answer, including after follow-ups", as
     );
     submit("follow-form");
     await vi.advanceTimersByTimeAsync(1200);
+    expect(details(member, signal)).toContain(`Returned ${member} follow-up`);
   }
   expect(currentBoard().verdicts).toMatchObject({
-    buffett: { headline: "Returned buffett follow-up" },
-    burry: { headline: "Returned burry follow-up" },
+    buffett: { headline: "Returned buffett follow-up", signal: "HOLD" },
+    burry: { headline: "Returned burry follow-up", signal: "SELL" },
   });
   expect(currentBoard().chair).toBeUndefined();
-  for (const member of ["buffett", "burry"]) {
-    const followUp = details(member);
+  for (const [member, signal] of [
+    ["buffett", "HOLD"],
+    ["burry", "SELL"],
+  ] as const) {
+    const followUp = details(member, signal);
     expect(followUp).toContain(`Returned ${member} follow-up`);
     expect(followUp).not.toContain("Returned initial chair summary");
     expect(followUp).not.toContain("individual verdict");
   }
+  const transcript = renderToStaticMarkup(
+    get("className", "transcript").children,
+  );
+  for (const member of Object.keys(members))
+    expect(transcript).toContain(`Returned ${member} individual verdict`);
+  expect(transcript).toContain("Returned initial chair summary");
 });

@@ -576,26 +576,28 @@ export default function App() {
             <span>EST. MMXXVI</span>
           </div>
           <div className="member-strip">
-            {memberIds.map((member) => (
-              <button
-                key={member}
-                onClick={() => setSelected(member)}
-                className={active === member ? "active" : ""}
-              >
-                <span className={`portrait-mini ${member}`} />
-                <span>
-                  <strong>{members[member].name}</strong>
-                  <small>{members[member].role}</small>
-                </span>
-                {verdicts[member] && (
-                  <b
-                    className={`signal ${verdicts[member]!.signal.toLowerCase()}`}
-                  >
-                    {verdicts[member]!.signal}
-                  </b>
-                )}
-              </button>
-            ))}
+            {memberIds.map((member) => {
+              const signal =
+                member === "buffett" && boardChair
+                  ? boardChair.overall_signal
+                  : boardVerdicts[member]?.signal;
+              return (
+                <button
+                  key={member}
+                  onClick={() => setSelected(member)}
+                  className={active === member ? "active" : ""}
+                >
+                  <span className={`portrait-mini ${member}`} />
+                  <span>
+                    <strong>{members[member].name}</strong>
+                    <small>{members[member].role}</small>
+                  </span>
+                  {signal && (
+                    <b className={`signal ${signal.toLowerCase()}`}>{signal}</b>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </section>
         <aside className="panel" aria-label="Council chat and brief">
