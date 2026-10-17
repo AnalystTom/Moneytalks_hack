@@ -40,6 +40,14 @@ Answers are cached per demo user + question so the stage demo survives a bad net
   - Traces: `POST https://prism.blockconvey.com/api/traces`, header `X-PRISMtrace-Key`, one session id per council run.
   - Knowledge Base: each persona is a PRISM agent with its own documents (e.g. Berkshire letters); retrieval via `POST .../api/knowledge-base/search` with `agent_id`.
 
+## Repo layout
+
+- `spec.md` - this file.
+- `server/` - FastAPI backend.
+- `web/` - React frontend.
+
+The earlier TypeScript starter (working Nicrron call + PRISM trace and span ingest) is in commit `d8f4499`; use it as the reference for endpoints and payloads.
+
 ## PRISM proofs (required for judging)
 
 1. Knowledge Base: a run whose retrieval step used the persona's uploaded documents.
