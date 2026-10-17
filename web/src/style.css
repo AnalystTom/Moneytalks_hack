@@ -755,6 +755,57 @@ h4 {
   color: var(--accent);
   padding: 0 3px;
 }
+.profile-modal {
+  width: min(620px, calc(100vw - 32px));
+}
+.profile-text {
+  display: block;
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  color: var(--text);
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  margin: 14px 0;
+  font-size: 16px; /* 16px stops iOS zooming into the box */
+  line-height: 1.5;
+}
+.profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.profile-actions button {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 22px;
+  font-size: 14px;
+}
+.profile-submit {
+  color: var(--paper);
+  background: var(--accent);
+}
+.profile-demo,
+.profile-cancel {
+  background: var(--panel-highlight);
+}
+.change-details {
+  color: var(--accent);
+  background: transparent;
+  font-size: 11px;
+  text-decoration: underline;
+  padding: 7px 4px;
+}
+@media (max-width: 600px) {
+  .profile-modal {
+    padding: 20px;
+  }
+  .profile-actions button {
+    flex: 1 1 100%;
+  }
+}
 .drum-overlay {
   position: absolute;
   z-index: 9;

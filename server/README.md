@@ -75,6 +75,8 @@ curl -F portfolio=@../data/portfolio.json -F persona=@../data/PERSONA.md localho
 printf 'ticker,shares,cost_basis\nVOO,20,714.29\n' > portfolio.csv
 printf '# Alex\n10-year horizon, moderate risk\n' > persona.md
 curl -F portfolio=@portfolio.csv -F persona=@persona.md -F plaid=true localhost:8000/api/ingest
+# ingest from one block of free text (needs NICRRON_API_KEY): the model only extracts, every number must appear in the text
+curl -H 'content-type: application/json' -d '{"text":"I am Sam, 31. 40 shares of AAPL at $150, $8k in VOO, $12k cash. Goal: house deposit in 5 years."}' localhost:8000/api/ingest/text
 # -> {"brief_id":"...","summary":"$10,000 in VOO, -30%; $4,200 cash; 10-year horizon, moderate risk"}
 
 # council run (SSE); add "roast": true for roast mode

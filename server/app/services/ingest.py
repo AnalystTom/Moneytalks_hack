@@ -106,7 +106,7 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float, ne
     return out
 
 
-async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, account: dict | None = None) -> tuple[str, str]:
+async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, account: dict | None = None, note: str = "") -> tuple[str, str]:
     """Merge the sources into a stored brief; returns (brief_id, one-line summary)."""
     tickers = [h["ticker"] for h in holdings]
     last = await market.prices(tickers, {h["ticker"]: h.get("price", h["cost_basis"]) for h in holdings})
@@ -121,6 +121,8 @@ async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, accou
         parts.append(f"${cash:,.0f} cash")
     if profile := profile_line(persona):
         parts.append(profile)
+    if note:
+        parts.append(note)
     summary = "; ".join(parts)
     brief_id = uuid.uuid4().hex
     brief = BRIEFS[brief_id] = {

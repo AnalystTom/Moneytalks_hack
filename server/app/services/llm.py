@@ -38,7 +38,7 @@ def _wait(r: httpx.Response, attempt: int) -> float:
         return 1.5 * 2**attempt  # 1.5s, 3s, 6s
 
 
-async def complete_text(system: str, user: str) -> str:
+async def complete_text(system: str, user: str, response_format: dict | None = None) -> str:
     """One Nicrron (OpenAI-compatible) chat completion; rate limits and server errors are retried with backoff."""
     async with _limit(), httpx.AsyncClient(timeout=90) as client:
         for attempt in range(ATTEMPTS):
@@ -48,6 +48,7 @@ async def complete_text(system: str, user: str) -> str:
                 json={
                     "model": model(),
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    **({"response_format": response_format} if response_format else {}),
                 },
             )
             if r.status_code not in RETRY_STATUS or attempt == ATTEMPTS - 1:
@@ -57,9 +58,9 @@ async def complete_text(system: str, user: str) -> str:
     return r.json()["choices"][0]["message"]["content"] or ""
 
 
-async def complete_json(system: str, user: str) -> dict:
+async def complete_json(system: str, user: str, response_format: dict | None = None) -> dict:
     """A completion whose reply must be a JSON object."""
-    text = await complete_text(system, user)
+    text = await complete_text(system, user, response_format)
     match = re.search(r"\{.*\}", text, re.DOTALL)  # models sometimes wrap JSON in prose or fences
     if not match:
         raise ValueError("Nicrron reply contained no JSON object")
