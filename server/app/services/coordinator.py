@@ -33,13 +33,13 @@ def plan(brief: dict) -> dict[str, Assignment]:
     """One assignment per member: 2-4 focus tickers and 2-3 questions about this user."""
     f = brief["facts"]
     pos = f["positions"]  # sorted by value, largest first
-    by_gain = sorted(pos, key=lambda p: -p["pnl_pct"])
-    by_loss = sorted(pos, key=lambda p: p["pnl_pct"])
+    by_gain = sorted((p for p in pos if p["pnl_pct"] is not None), key=lambda p: -p["pnl_pct"])
+    by_loss = sorted((p for p in pos if p["pnl_pct"] is not None), key=lambda p: p["pnl_pct"])
     top = pos[0]
     focus = {
         "dalio": _rank(pos, lambda p: p["ticker"] in DIVERSIFIERS or "ETF" in p.get("sector", ""), 3) or [top["ticker"]],
         "buffett": _rank(pos, lambda p: p.get("sector") in ("Consumer Staples", "Healthcare") or p["ticker"] in ("AAPL", "BRK.B"), 3),
-        "burry": [p["ticker"] for p in by_gain if p["weight_pct"] >= 3][:3],
+        "burry": [p["ticker"] for p in by_gain if p["weight_pct"] is not None and p["weight_pct"] >= 3][:3],
         "leopold": _rank(pos, lambda p: p["ticker"] in AI_TICKERS, 4),
         "cramer": [p["ticker"] for p in by_loss if p["pnl_pct"] < 0][:3],
     }
@@ -47,7 +47,7 @@ def plan(brief: dict) -> dict[str, Assignment]:
         focus[m] = focus[m] or [p["ticker"] for p in pos[:2]]
     covered = {t for ts in focus.values() for t in ts}
     for p in pos:  # every position above 5% weight is in at least one assignment
-        if p["weight_pct"] > 5 and p["ticker"] not in covered:
+        if p["weight_pct"] is not None and p["weight_pct"] > 5 and p["ticker"] not in covered:
             m = min(("burry", "buffett"), key=lambda m: len(focus[m]))
             if len(focus[m]) < 4:
                 focus[m].append(p["ticker"])
@@ -55,7 +55,7 @@ def plan(brief: dict) -> dict[str, Assignment]:
     beta = f.get("portfolio_beta")
     nw = f.get("brokerage_pct_of_net_worth")
     tech = f["sector_mix_pct"].get("Technology")
-    worst = by_loss[0]
+    worst = by_loss[0] if by_loss else top
     questions = {
         "dalio": [
             f"The connected brokerage is {nw}% of net worth" + (f" at beta {beta}" if beta else "") + "; how does the whole balance sheet do in a stagflation regime?",
@@ -69,7 +69,7 @@ def plan(brief: dict) -> dict[str, Assignment]:
             "Is the uninvested cash working, and should it be?",
         ],
         "burry": [
-            f"{top['ticker']} is {top['weight_pct']}% of holdings at {top['pnl_pct']:+}%; what is priced in?",
+            f"{top['ticker']} is {top['weight_pct']}% of holdings at {top['pnl_pct']:+}%; what is priced in?" if top["weight_pct"] is not None and top["pnl_pct"] is not None else f"Valuation or profit/loss for {top['ticker']} is unavailable; what data is needed to assess it?",
             f"What breaks first if the consensus on {', '.join(focus['burry'])} is wrong?",
         ],
         "leopold": [
@@ -77,7 +77,7 @@ def plan(brief: dict) -> dict[str, Assignment]:
             "Which holdings are exposed to AI disruption, and what is missing from the build-out?",
         ],
         "cramer": [
-            f"{worst['ticker']} is {worst['pnl_pct']:+}%; catalyst or dead money?",
+            f"{worst['ticker']} is {worst['pnl_pct']:+}%; catalyst or dead money?" if worst["pnl_pct"] is not None else f"Profit/loss for {worst['ticker']} is unavailable; what data is needed to assess performance?",
             f"Tech is {tech}% of holdings; is this diversified?" if tech else "Is this diversified across sectors?",
         ],
     }
@@ -195,7 +195,7 @@ def rule_names(verdicts: dict[str, Verdict], brief: dict) -> list[NameRuling]:
                 conviction = "mid" if n >= 3 else "low"
             consensus = f"{top} of {n} say {signal}"
         out.append(NameRuling(ticker=t, calls={m: s for m, (s, _) in c.items()}, signal=signal, conviction=conviction, consensus=consensus))
-    return sorted(out, key=lambda r: (-order.index(r.conviction), r.signal == "HOLD", -len(r.calls), -weight.get(r.ticker, 0)))
+    return sorted(out, key=lambda r: (-order.index(r.conviction), r.signal == "HOLD", -len(r.calls), -(weight.get(r.ticker) or 0)))
 
 
 def rule(verdicts: dict[str, Verdict], brief: dict, roast: bool) -> Chair:

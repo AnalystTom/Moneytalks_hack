@@ -1,8 +1,9 @@
 import json
 
+import httpx
 import pytest
 
-from app.services import ingest, llm, profile
+from app.services import ingest, llm, profile, store
 from tests.conftest import PERSONA, PORTFOLIO, run_council
 
 
@@ -70,17 +71,24 @@ def test_ingest_text_builds_brief_from_user_values_only(client, model):
     r = client.post("/api/ingest/text", json={"text": SAM})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["summary"] == "$17,200 in AAPL, VOO, +23%; $12,000 cash; Sam, 31; not given: cost basis for VOO"
+    assert body["summary"] == "AAPL, VOO: total valuation unavailable, profit/loss unavailable; $12,000 cash; Sam, 31; not given: cost basis for VOO, share count for VOO"
     brief = ingest.BRIEFS[body["brief_id"]]
     pos = {p["ticker"]: p for p in brief["facts"]["positions"]}
     assert pos["AAPL"]["shares"] == 40 and pos["AAPL"]["cost_basis"] == 150
-    assert pos["VOO"]["shares"] == 16  # $8k at the quoted $500
+    assert pos["VOO"]["amount"] == pos["VOO"]["value"] == 8000
+    assert pos["VOO"]["shares"] is pos["VOO"]["cost_basis"] is None
+    assert pos["AAPL"]["price"] is pos["AAPL"]["value"] is None
+    assert brief["value"] is brief["pnl_pct"] is None
+    assert brief["facts"]["winners"] is brief["facts"]["losers"] is None
+    assert all(p["pnl_pct"] is p["weight_pct"] is None for p in pos.values())
     assert brief["account"] == {"cash": 12000}
-    assert body["missing"] == ["cost basis for VOO"]
+    assert body["missing"] == ["cost basis for VOO", "share count for VOO"]
     assert "Not provided by the user" in brief["persona"] and "Sam" in brief["persona"]
     assert body["card"]["title"] == "Sam, 31 — context loaded"
     assert "Goal: house deposit in 5 years" in body["card"]["lines"]
-    assert "Not given: cost basis for VOO" in body["card"]["lines"]
+    assert "Not given: cost basis for VOO, share count for VOO" in body["card"]["lines"]
+    assert "2 holdings — total valuation unavailable" in body["card"]["lines"]
+    assert "VOO: share count not given, $8,000.00 reported amount, cost basis not given" in body["card"]["lines"]
     assert "net worth" not in brief["persona"].lower()  # not given, so not written
 
 
@@ -103,7 +111,6 @@ def test_ingest_text_leaves_missing_fields_missing(client, model):
         ({"positions": []}, SAM, "couldn't find any holdings"),
         ({"positions": [{"ticker": "AAPL", "shares": 400, "cost_basis": 150, "amount": None}]}, SAM, "AAPL shares (400)"),
         ({"positions": [{"ticker": "AAPL", "shares": None, "cost_basis": None, "amount": None}]}, SAM, "How much AAPL"),
-        ({"positions": [{"ticker": "ZZZZ", "shares": 5, "cost_basis": None, "amount": None}]}, "5 shares of ZZZZ", "can't price ZZZZ"),
         ({"positions": [{"ticker": "TSLA", "shares": 40, "cost_basis": 150, "amount": None}]}, SAM, "didn't see TSLA"),
         ({"positions": [{"ticker": "not a ticker", "shares": 5, "cost_basis": 1, "amount": None}]}, "5 shares", "doesn't look like a ticker"),
     ],
@@ -132,22 +139,121 @@ def test_ingest_text_needs_model_and_nonempty_text(client, monkeypatch):
     assert client.post("/api/ingest/text", json={"text": "x" * 4001}).status_code == 422
 
 
-def test_ingest_text_brief_drives_council(client, model):
+def test_ingest_text_brief_drives_council(client, model, monkeypatch):
     model["value"] = _profile()
     brief_id = client.post("/api/ingest/text", json={"text": SAM}).json()["brief_id"]
+    monkeypatch.delenv("NICRRON_API_KEY")
     events = run_council(client, brief_id)[1]
-    assert events[0][0] == "run.started"
+    assert events[-1][0] == "run.done"
+    assert "run.error" not in [event for event, _ in events]
+    verdicts = [data for event, data in events if event == "member.verdict"]
+    assert len(verdicts) == 5
+    assert all("unavailable" in v["analysis"] for v in verdicts)
+    assert all("unavailable" in p["rationale"] for v in verdicts for p in v["positions"])
 
 
-def test_ingest_text_is_traced_to_prism(client, model, monkeypatch):
-    spans = []
+@pytest.mark.parametrize("failure", [None, "validation", "schema", "provider"])
+def test_ingest_text_is_traced_to_prism_without_personal_data(client, model, monkeypatch, failure):
+    requests = []
 
-    async def span(*args, **kw):
-        spans.append((args[1], kw.get("ok", True)))
+    def capture(request):
+        requests.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={})
 
-    monkeypatch.setattr(profile.prism, "span", span)
-    model["value"] = _profile()
-    client.post("/api/ingest/text", json={"text": SAM})
-    model["value"] = _profile(positions=[])
-    client.post("/api/ingest/text", json={"text": SAM})
-    assert spans == [("council.ingest_text", True), ("council.ingest_text", False)]
+    original = httpx.AsyncClient
+    monkeypatch.setattr(profile.prism, "_auth", lambda: ("https://trace.test", {}, "project"))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(**kw, transport=httpx.MockTransport(capture)))
+    model["value"] = _profile(positions=[]) if failure == "validation" else {"surprise": True} if failure == "schema" else _profile()
+    if failure == "provider":
+        async def fail(*args):
+            raise httpx.ConnectError(SAM)
+        monkeypatch.setattr(llm, "complete_json", fail)
+    response = client.post("/api/ingest/text", json={"text": SAM})
+    assert response.status_code == (502 if failure == "provider" else 422 if failure else 200)
+    assert [path for path, _ in requests] == ["/api/traces", "/api/spans/ingest"]
+    trace, spans = [body for _, body in requests]
+    assert trace["input_messages"] == [{"role": "user", "content": ""}]
+    metadata = json.loads(trace["output_message"])
+    assert set(metadata) == {"model", "latency_ms", "success", "field_count", "position_field_count"}
+    assert metadata["model"] == trace["model"] == llm.model()
+    assert metadata["latency_ms"] >= 0
+    assert metadata["success"] is (failure is None)
+    assert metadata["field_count"] == (0 if failure in ("schema", "provider") else 7)
+    assert metadata["position_field_count"] == (5 if failure is None else 0)
+    assert len(spans["spans"]) == 1
+    span = spans["spans"][0]
+    assert span["input_text"] == ""
+    assert json.loads(span["output_text"]) == metadata
+    assert span["status"] == ("error" if failure else "ok")
+
+
+@pytest.mark.parametrize("ticker, shares, amount", [("VOO", None, 8000), ("ZZZZ", None, 8000), ("ZZZZ", 5, None)])
+def test_ingest_text_accepts_unpriced_positions_without_inventing_figures(client, model, ticker, shares, amount):
+    model["value"] = _profile(name=None, age=None, cash=None, goals=None, horizon=None, risk=None,
+                              positions=[{"ticker": ticker, "shares": shares, "cost_basis": None, "amount": amount}])
+    text = f"${amount} in {ticker}" if amount else f"{shares} shares of {ticker}"
+    response = client.post("/api/ingest/text", json={"text": text})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    brief = ingest.BRIEFS.pop(body["brief_id"])
+    position = brief["facts"]["positions"][0]
+    assert position["shares"] == shares
+    assert position["amount"] == position["value"] == amount
+    assert position["price"] is position["cost_basis"] is position["pnl_pct"] is None
+    assert position["weight_pct"] == (100 if amount else None)
+    assert brief["facts"]["unrealized_pl"] is brief["pnl_pct"] is None
+    assert "profit/loss unavailable" in body["summary"]
+    if amount:
+        assert f"${amount:,.0f} across 1 holdings" in body["card"]["lines"]
+    else:
+        assert "1 holdings — total valuation unavailable" in body["card"]["lines"]
+    assert json.loads(store._mem["brief", body["brief_id"]]) == brief
+
+
+@pytest.mark.parametrize("net_worth", [None, 123456.78, 0])
+def test_ingest_text_uses_explicit_net_worth_not_goal_text(client, model, net_worth):
+    model["value"] = _profile(name=None, age=None, cash=None, goals="net worth of $1m", horizon=None, risk=None,
+                              net_worth=net_worth, positions=[{"ticker": "AAPL", "shares": None, "cost_basis": None, "amount": 8000}])
+    text = "$8k in AAPL; goal: net worth of $1m" + (f"; current net worth ${net_worth}" if net_worth is not None else "")
+    body = client.post("/api/ingest/text", json={"text": text}).json()
+    facts = ingest.BRIEFS[body["brief_id"]]["facts"]
+    assert facts.get("net_worth") == net_worth
+    if net_worth:
+        assert facts["brokerage_pct_of_net_worth"] == round(8000 / net_worth * 100, 1)
+    else:
+        assert "brokerage_pct_of_net_worth" not in facts
+
+
+@pytest.mark.parametrize("lots, text, shares, amount, basis", [
+    ([{"ticker": "aapl", "shares": 10, "cost_basis": 100, "amount": None},
+      {"ticker": "AAPL", "shares": 20, "cost_basis": 200, "amount": None}],
+     "10 shares of AAPL at $100 in one account; 20 shares of AAPL at $200 in another", 30, None, 5000 / 30),
+    ([{"ticker": "VOO", "shares": None, "cost_basis": None, "amount": 8000},
+      {"ticker": "VOO", "shares": None, "cost_basis": None, "amount": 4000}],
+     "$8k in VOO in one account; $4k in VOO in another", None, 12000, None),
+    ([{"ticker": "AAPL", "shares": 10, "cost_basis": 100, "amount": None},
+      {"ticker": "AAPL", "shares": 20, "cost_basis": None, "amount": None}],
+     "10 shares of AAPL at $100 in one account; 20 shares of AAPL in another", 30, None, None),
+    ([{"ticker": "AAPL", "shares": 10, "cost_basis": 100, "amount": None},
+      {"ticker": "AAPL", "shares": None, "cost_basis": None, "amount": 8000}],
+     "10 shares of AAPL at $100 in one account; $8k in AAPL in another", None, None, None),
+])
+def test_ingest_text_consolidates_lots_without_losing_unknowns(client, model, monkeypatch, lots, text, shares, amount, basis):
+    model["value"] = _profile(name=None, age=None, cash=None, goals=None, horizon=None, risk=None, positions=lots)
+    response = client.post("/api/ingest/text", json={"text": text})
+    assert response.status_code == 200, response.text
+    brief = ingest.BRIEFS[response.json()["brief_id"]]
+    assert len(brief["holdings"]) == len(brief["facts"]["positions"]) == 1
+    position = brief["facts"]["positions"][0]
+    assert position["shares"] == shares
+    assert position["amount"] == position["value"] == amount
+    assert position["cost_basis"] == (pytest.approx(basis) if basis is not None else None)
+    assert position["weight_pct"] == (100 if amount else None)
+    assert position["lots"] == [{**lot, "ticker": lot["ticker"].upper()} for lot in lots]
+    if basis is not None:
+        assert position["cost"] == 5000
+    monkeypatch.delenv("NICRRON_API_KEY")
+    events = run_council(client, response.json()["brief_id"])[1]
+    assert events[-1][0] == "run.done"
+    ruling = next(data for event, data in events if event == "chair.summary")
+    assert len(ruling["positions"]) == 1

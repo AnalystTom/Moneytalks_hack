@@ -183,7 +183,11 @@ it("auto-ingests the checked-in context and renders only chat with one composer"
 const SAM = "I'm Sam, 31. 40 shares of AAPL at $150, $8k in VOO, $12k cash.";
 const samCard = {
   title: "Sam, 31 — context loaded",
-  lines: ["$17,200 across 2 holdings", "Cash: $12,000", "Not given: goals"],
+  lines: [
+    "2 holdings — total valuation unavailable",
+    "Cash: $12,000",
+    "Not given: goals",
+  ],
 };
 function mockIngestText(response: Response, brief = "sam") {
   const demo = vi.mocked(fetch).getMockImplementation()!;
@@ -292,6 +296,60 @@ it("lets the user reopen the box, keeps their text, and switch back to the demo"
   expect(html).toContain("Jordan, 38 — context loaded");
   expect(html).toContain("Replace portfolio");
 });
+
+it.each(["details", "demo", "portfolio"])(
+  "clears old suggestions when switching to %s and retains them on Cancel",
+  async (destination) => {
+    vi.useFakeTimers();
+    const chip = "Should I reduce my old PLTR position?";
+    vi.mocked(streamCouncil).mockImplementationOnce(
+      async (_, __, ___, receive) => {
+        await receive({ event: "run.started", data: { run_id: "parent" } });
+        await receive({
+          event: "chat.closed",
+          data: { text: "", suggestions: [chip] },
+        });
+        await receive({ event: "run.done", data: { run_id: "parent" } });
+      },
+    );
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(1200);
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).toContain(chip);
+    get("className", "change-details").onClick!();
+    get("type", ProfileModal).onCancel!();
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).toContain(chip);
+    if (destination === "portfolio") {
+      get("aria-label", "Replace portfolio").onChange!({
+        target: {
+          value: "",
+          files: [
+            new File(["ticker,shares,cost_basis\nMSFT,7,200"], "new.csv"),
+          ],
+        },
+      });
+    } else {
+      get("className", "change-details").onClick!();
+      if (destination === "demo") get("type", ProfileModal).onDemo!();
+      else {
+        mockIngestText(Response.json({}));
+        submitDetails(SAM);
+      }
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get("className", "context-chip").children).toBe(
+      destination === "details"
+        ? "Your details loaded"
+        : destination === "demo"
+          ? "Jordan’s portfolio loaded"
+          : "new.csv loaded",
+    );
+    expect(() => get("className", "chips")).toThrow("Missing");
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).not.toContain(chip);
+  },
+);
 
 it("re-ingests the user's text, not the demo, when the server forgets the brief", async () => {
   await openFresh();

@@ -18,7 +18,7 @@ async def post_ingest(
         text = (await persona.read()).decode("utf-8-sig")
     except ValueError as e:  # includes JSON and unicode decode errors
         raise HTTPException(422, str(e)) from e
-    brief_id, summary = await ingest.build_brief(holdings, text, plaid, account)
+    brief_id, summary = await ingest.build_brief(holdings, text, plaid, account, net_worth=ingest._money(text, r"Net Worth"))
     return {"brief_id": brief_id, "summary": summary}
 
 

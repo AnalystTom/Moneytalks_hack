@@ -54,6 +54,8 @@ def _etf(p: dict) -> bool:
 def _call(member: str, p: dict) -> tuple[str, str, str]:
     """Canned per-name decision through each lens: (signal, conviction, rationale), numbers from the brief."""
     t, w, pnl, spec = p["ticker"], p["weight_pct"], p["pnl_pct"], p.get("role") == "speculative"
+    if w is None or pnl is None:
+        return "HOLD", "low", f"{t}: valuation or profit/loss is unavailable; provide current value and cost basis before a size or performance-based call."
     if member == "buffett":
         if _etf(p):
             return "BUY", "high", f"{t}: a low-cost index is the one thing everybody should keep buying."
@@ -113,6 +115,8 @@ def _roast(roast: bool) -> str:
 
 def _fill(text: str, f: dict) -> str:
     pos = f["positions"]
+    if any(p["weight_pct"] is None or p["pnl_pct"] is None for p in pos):
+        return "Current valuation or profit/loss is unavailable; missing prices and cost basis must be supplied before assessing concentration or performance."
     worst = min(pos, key=lambda p: p["pnl_pct"])
     return text.format(
         top=pos[0]["ticker"], top_w=pos[0]["weight_pct"], top_pnl=f"{pos[0]['pnl_pct']:+}",

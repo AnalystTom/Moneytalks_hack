@@ -5,11 +5,12 @@ stays null and is called out in the brief, so the council never reasons over inv
 """
 import json
 import re
+import time
 import uuid
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.services import ingest, llm, market, prism
+from app.services import ingest, llm, prism
 
 MAX_CHARS = 4000
 
@@ -82,7 +83,7 @@ def _numbers(text: str) -> list[float]:
 
 
 def validate(profile: Profile, text: str) -> list[str]:
-    """Problems that make a profile unusable: no positions, a position we cannot size or price, or a number the user never wrote."""
+    """Reject missing sizes and numbers the user never wrote."""
     problems = []
     if not profile.positions:
         problems.append("I couldn't find any holdings in that. Add at least one position, like “40 shares of AAPL at $150”.")
@@ -99,8 +100,6 @@ def validate(profile: Profile, text: str) -> list[str]:
         figures += [(f"{t} shares", p.shares), (f"{t} cost", p.cost_basis), (f"{t} amount", p.amount)]
         if p.shares is None and p.amount is None:
             problems.append(f"How much {t} do you hold? Give a share count or a dollar amount.")
-        elif t not in market.PRICES and (p.shares is None or p.cost_basis is None):
-            problems.append(f"I can't price {t} yet, so give its share count and the price you paid.")
         elif (p.shares is not None and p.shares <= 0) or (p.amount is not None and p.amount <= 0):
             problems.append(f"{t} needs a positive size.")
     for label, value in figures:
@@ -110,13 +109,20 @@ def validate(profile: Profile, text: str) -> list[str]:
 
 
 def holdings(profile: Profile) -> list[dict]:
-    """Broker-style holdings; a dollar amount becomes shares at the quoted price, and an unknown cost basis is left unknown."""
-    out = []
+    """One holding per ticker, retaining unknown totals and the supplied lots."""
+    grouped: dict[str, list[dict]] = {}
     for p in profile.positions:
         t = p.ticker.strip().upper()
-        price = market.PRICES.get(t)
-        shares = p.shares if p.shares is not None else (p.amount or 0) / price
-        out.append({"ticker": t, "shares": shares, "cost_basis": p.cost_basis if p.cost_basis is not None else price})
+        grouped.setdefault(t, []).append({**p.model_dump(), "ticker": t})
+    out = []
+    for t, lots in grouped.items():
+        if len(lots) == 1:
+            out.append(lots[0])
+            continue
+        shares = sum(p["shares"] for p in lots) if all(p["shares"] is not None for p in lots) else None
+        amount = sum(p["amount"] for p in lots) if all(p["amount"] is not None for p in lots) else None
+        basis = sum(p["shares"] * p["cost_basis"] for p in lots) / shares if shares and all(p["cost_basis"] is not None for p in lots) else None
+        out.append({"ticker": t, "shares": shares, "cost_basis": basis, "amount": amount, "lots": lots})
     return out
 
 
@@ -126,13 +132,14 @@ def missing(profile: Profile) -> list[str]:
         ("investment horizon", profile.horizon), ("risk tolerance", profile.risk),
     ] if value is None]
     gaps += [f"cost basis for {p.ticker.strip().upper()}" for p in profile.positions if p.cost_basis is None]
-    return gaps
+    gaps += [f"share count for {p.ticker.strip().upper()}" for p in profile.positions if p.shares is None]
+    return list(dict.fromkeys(gaps))
 
 
 def persona(profile: Profile, gaps: list[str]) -> str:
     """The persona markdown the council reads (same table layout as data/PERSONA.md), with the gaps spelled out."""
     rows = [("Name", profile.name), ("Age", profile.age and f"{profile.age} years"),
-            ("Total Net Worth", profile.net_worth and f"${profile.net_worth:,.0f} USD")]
+            ("Total Net Worth", f"${profile.net_worth:,} USD" if profile.net_worth is not None else None)]
     lines = ["# Persona Profile (self-reported)", "", "| Attribute | Details |", "| --- | --- |"]
     lines += [f"| **{k}** | {v} |" for k, v in rows if v]
     lines += [f"- **{k}:** {v}" for k, v in [("Goal", profile.goals), ("Horizon", profile.horizon), ("Risk tolerance", profile.risk)] if v]
@@ -144,7 +151,17 @@ def persona(profile: Profile, gaps: list[str]) -> str:
 def card(profile: Profile, f: dict, gaps: list[str]) -> dict:
     """Context card for the chat, built only from what the user gave."""
     who = (profile.name or "").strip() and f"{profile.name.split()[0]}{f', {profile.age}' if profile.age else ''}"
-    lines = [f"${f['holdings_value']:,.0f} across {len(f['positions'])} holdings", "Top positions: " + ", ".join(f["top5"][:3])]
+    value = f["holdings_value"]
+    lines = [f"${value:,.0f} across {len(f['positions'])} holdings" if value is not None else f"{len(f['positions'])} holdings — total valuation unavailable"]
+    for holding in f["positions"]:
+        for lot in holding.get("lots", [holding]):
+            details = [f"{lot['shares']:g} shares" if lot["shares"] is not None else "share count not given"]
+            if lot.get("amount") is not None:
+                details.append(f"${lot['amount']:,.2f} reported amount")
+            details.append(f"${lot['cost_basis']:g} cost basis per share" if lot["cost_basis"] is not None else "cost basis not given")
+            lines.append(f"{holding['ticker']}: " + ", ".join(details))
+    if f["unrealized_pl_pct"] is None:
+        lines.append("Profit/loss unavailable: current prices or cost basis not provided")
     if f.get("broker_cash"):
         lines.append(f"Cash: ${f['broker_cash']:,.0f}")
     if profile.goals:
@@ -164,19 +181,25 @@ async def extract(text: str) -> Profile:
 async def build(text: str) -> dict:
     """Extract, validate and store a brief from free text; raises ValueError (message safe to show) when it can't."""
     session = uuid.uuid4().hex
+    started = time.perf_counter()
+    profile = None
+    ok = False
     try:
         profile = await extract(text)
         if problems := validate(profile, text):
             raise ValueError(" ".join(problems))
-    except ValueError as e:
-        await prism.span(session, "council.ingest_text", "agent", text, str(e), ok=False)
-        raise
+        ok = True
+    finally:
+        metadata = {"model": llm.model(), "latency_ms": round((time.perf_counter() - started) * 1000), "success": ok,
+                    "field_count": sum(v is not None for v in profile.model_dump().values()) if profile else 0,
+                    "position_field_count": sum(v is not None for p in profile.positions for v in p.model_dump().values()) if profile else 0}
+        await prism.trace(session, "council.ingest_text", "", json.dumps(metadata), [], ok=ok, model=llm.model(), span_type="llm")
     gaps = missing(profile)
     cash = profile.cash or 0
     brief_id, summary = await ingest.build_brief(
         holdings(profile), persona(profile, gaps), False, {"cash": cash} if cash else None,
         note=f"not given: {', '.join(gaps)}" if gaps else "",
+        prices={}, net_worth=profile.net_worth,
     )
     f = ingest.BRIEFS[brief_id]["facts"]
-    await prism.span(session, "council.ingest_text", "agent", text, json.dumps({"brief_id": brief_id, **profile.model_dump()}))
     return {"brief_id": brief_id, "summary": summary, "card": card(profile, f, gaps), "missing": gaps}

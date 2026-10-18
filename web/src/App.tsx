@@ -332,6 +332,7 @@ export default function App() {
   }
   function resetConversation() {
     setMessages([]);
+    setSuggestions([]);
     setVerdicts({});
     setChair(undefined);
     setStatuses({});
