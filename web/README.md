@@ -34,7 +34,7 @@ Bubbles preview the server's `speech_bubble` field when returned, otherwise the 
 
 Answers never play automatically. Tap the speaker beside a scene bubble or member/chair message to request that answer in its member's voice. The icon shows loading, then a stop button during playback; tap again to cancel or stop. Starting another answer, sending a question, replacing context, or recording stops the previous clip and cancels pending speech. Long answers are read in endpoint-sized chunks. Provider/playback failures show an explicit error and allow retry. There is no global player or sound toggle.
 
-At widths up to 800px, the scene and chat stack, the five seats scroll horizontally with one-line answer previews, and the composer stays at the bottom of the viewport while the transcript scrolls.
+At widths up to 800px, the scene and chat stack, the five seats scroll horizontally with one-line answer previews, and the composer stays at the bottom of the viewport while the transcript scrolls. When the keyboard reduces the available height, the scene and chat can scroll vertically to keep the composer and its controls reachable.
 
 Use **Speak your question** above the composer to record a question, then **Stop recording** to transcribe it with ElevenLabs Scribe v2. Review the text and send; existing composer text is preserved. Reply to a member message for a spoken follow-up. Capture pauses previous audio to avoid recording it, stops at sixty seconds, and releases the microphone on errors or unmount. Microphone access needs HTTPS or localhost; provider errors leave typed input intact. See [server voice setup](../server/README.md#voice-conversations) for credentials and privacy.
 

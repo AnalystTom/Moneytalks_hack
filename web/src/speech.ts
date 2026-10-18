@@ -3,6 +3,9 @@ import type { Speaker } from "./contract";
 
 export type PlaybackState = { id: string; status: "loading" | "playing" };
 
+const silentAudio =
+  "data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
+
 // One owner for every scene and transcript button, including in-flight requests.
 export class SpeechPlayback {
   private abort?: AbortController;
@@ -28,7 +31,6 @@ export class SpeechPlayback {
       this.player.pause();
       this.player.removeAttribute("src");
       this.player.load();
-      this.player = undefined;
     }
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = undefined;
@@ -49,6 +51,11 @@ export class SpeechPlayback {
       this.stop();
       this.error(message);
     };
+    const player = (this.player ??= new Audio());
+    player.src = silentAudio;
+    const authorization = player
+      .play()
+      .catch(() => fail("Voice could not play. Tap the speaker to retry."));
     // The endpoint accepts 2,500 characters; read long answers in full, in order.
     let remaining = text.trim();
     const next = async () => {
@@ -66,6 +73,9 @@ export class SpeechPlayback {
         60000,
       );
       try {
+        await authorization;
+        if (abort.signal.aborted) return;
+        player.pause();
         const response = await fetch("/api/voice/speak", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -80,11 +90,11 @@ export class SpeechPlayback {
         const blob = await response.blob();
         if (abort.signal.aborted) return;
         clearTimeout(this.timer);
-        this.url = URL.createObjectURL(blob);
-        const player = new Audio(this.url);
-        this.player = player;
+        const url = URL.createObjectURL(blob);
+        this.url = url;
+        player.src = url;
         const progress = () => {
-          if (abort.signal.aborted || this.player !== player) return;
+          if (abort.signal.aborted || this.url !== url) return;
           clearTimeout(this.timer);
           this.timer = setTimeout(
             () => fail("Voice playback stalled. Tap the speaker to retry."),
@@ -93,25 +103,24 @@ export class SpeechPlayback {
         };
         player.ontimeupdate = progress;
         player.onerror = () => {
-          if (this.player === player)
+          if (!abort.signal.aborted && this.url === url)
             fail("Voice could not play. Tap the speaker to retry.");
         };
         player.onended = () => {
-          if (abort.signal.aborted || this.player !== player) return;
+          if (abort.signal.aborted || this.url !== url) return;
           clearTimeout(this.timer);
           player.onended = player.onerror = player.ontimeupdate = null;
-          URL.revokeObjectURL(this.url!);
+          URL.revokeObjectURL(url);
           this.url = undefined;
-          this.player = undefined;
           if (remaining) void next();
           else this.stop();
         };
         progress();
         await player.play().catch(() => {
-          if (this.player === player)
+          if (!abort.signal.aborted && this.url === url)
             fail("Voice could not play. Tap the speaker to retry.");
         });
-        if (!abort.signal.aborted && this.player === player)
+        if (!abort.signal.aborted && this.url === url)
           this.changed({ id, status: "playing" });
       } catch (cause) {
         if (!abort.signal.aborted)
