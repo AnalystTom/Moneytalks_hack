@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import VoiceInput from "./VoiceInput";
+import ReadAloud from "./ReadAloud";
+import { SpeechPlayback } from "./speech";
 import { streamCouncil } from "./contract";
 import type { Verdict } from "./contract";
 
@@ -222,24 +224,6 @@ it.each(["request failure", "cancellation", "stream error", "early end"])(
     expect(get("id", "message").value).toBe("");
   },
 );
-
-it("cancels during health loading before opening a stream and permits retry", async () => {
-  let release!: (response: Response) => void;
-  vi.mocked(fetch).mockImplementationOnce(
-    () =>
-      new Promise<Response>((resolve) => {
-        release = resolve;
-      }),
-  );
-  submit("chat-form");
-  get("aria-label", "Cancel session").onClick!();
-  release(Response.json({ voice: true }));
-  await idle();
-  expect(streamCouncil).not.toHaveBeenCalled();
-  submit("chat-form");
-  await idle();
-  expect(streamCouncil).toHaveBeenCalledOnce();
-});
 
 it.each([
   ["unknown brief_id", false, "reload", false],
@@ -570,350 +554,42 @@ it("answers a follow-up as a fresh session when the server lost the run", async 
   );
 });
 
-describe("spoken answers", () => {
-  beforeEach(() => {
+describe("click-to-read answers", () => {
+  it("never autoplays streamed audio and requests the selected member only on click", async () => {
     vi.useFakeTimers();
-    vi.stubGlobal("window", { location: { origin: "http://localhost" } });
-  });
-
-  function audioPlayer() {
-    const player = {
-      src: "",
-      currentTime: 0,
-      ended: false,
-      onended: null as (() => void) | null,
-      onpause: null as (() => void) | null,
-      onplaying: null as (() => void) | null,
-      ontimeupdate: null as (() => void) | null,
-      onerror: null as (() => void) | null,
-      play: vi.fn(async () => {}),
-      pause: vi.fn((): void => {
-        player.onpause?.();
-      }),
-    };
-    get("aria-label", "Council voice playback").ref!.current = player;
-    return player;
-  }
-
-  function spokenStream(hang = false) {
+    const toggle = vi
+      .spyOn(SpeechPlayback.prototype, "toggle")
+      .mockResolvedValue();
     vi.mocked(streamCouncil).mockImplementationOnce(
-      async (_, __, signal, receive) => {
-        await receive({ event: "run.started", data: { run_id: "parent" } });
+      async (_, __, ___, receive) => {
+        await receive({ event: "member.verdict", data: verdict });
         await receive({
           event: "member.audio",
-          data: { member: "buffett", audio_url: "/api/voice/speak" },
+          data: {
+            member: "buffett",
+            audio_url: "/api/voice/speak?text=ignored",
+          },
         });
-        signal.throwIfAborted();
-        // A still-running stream is what makes the cancel button show.
-        if (hang)
-          await new Promise<void>((_, reject) =>
-            signal.addEventListener("abort", () => reject(signal.reason)),
-          );
-        await receive({ event: "run.done", data: { run_id: "parent" } });
-      },
-    );
-  }
-
-  it.each([false, true])(
-    "finishes progressing speech through pause, microtasks, then ended (follow-up: %s)",
-    async (follow) => {
-      if (follow) {
-        await replySession();
-      }
-      const player = audioPlayer();
-      const speakers = follow
-        ? (["buffett"] as const)
-        : (["leopold", "cramer", "burry", "buffett"] as const);
-      vi.mocked(streamCouncil).mockImplementationOnce(
-        async (_, __, signal, receive) => {
-          await receive({ event: "run.started", data: { run_id: "parent" } });
-          for (const member of speakers) {
-            await receive({
-              event: "member.audio",
-              data: { member, audio_url: `/api/voice/speak?member=${member}` },
-            });
-            signal.throwIfAborted();
-          }
-          await receive({ event: "run.done", data: { run_id: "parent" } });
-        },
-      );
-      submit("chat-form");
-      await vi.advanceTimersByTimeAsync(0);
-      for (let i = 0; i < speakers.length; i++) {
-        expect(player.play).toHaveBeenCalledTimes(i + 1);
-        player.onplaying!();
-        for (let seconds = 0; seconds < (follow ? 200 : 50); seconds += 10) {
-          await vi.advanceTimersByTimeAsync(10000);
-          player.currentTime += 10;
-          player.ontimeupdate?.();
-        }
-        expect(player.pause).toHaveBeenCalledTimes(i);
-        player.ended = true;
-        const source = player.src;
-        player.onpause!();
-        await vi.advanceTimersByTimeAsync(0);
-        expect(player.play).toHaveBeenCalledTimes(i + 1);
-        expect(player.pause).toHaveBeenCalledTimes(i);
-        expect(player.src).toBe(source);
-        player.onended!();
-        await vi.advanceTimersByTimeAsync(0);
-        player.ended = false;
-        player.currentTime = 0;
-      }
-      expect(player.pause).toHaveBeenCalledTimes(speakers.length);
-      expect(get("aria-label", "Send message")).toBeDefined();
-      expect(vi.getTimerCount()).toBe(0);
-    },
-  );
-
-  it("lets a new question through while answers are still read aloud", async () => {
-    const player = audioPlayer();
-    vi.mocked(streamCouncil).mockImplementationOnce(
-      async (_, __, ___, receive) => {
-        await receive({ event: "run.started", data: { run_id: "parent" } });
-        for (const member of ["leopold", "buffett"] as const)
-          await receive({
-            event: "member.audio",
-            data: { member, audio_url: `/api/voice/speak?member=${member}` },
-          });
+        await receive({
+          event: "member.reply",
+          data: { member: "chair", text: "Returned follow-up" },
+        });
         await receive({ event: "run.done", data: { run_id: "parent" } });
       },
     );
     submit("chat-form");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(player.play).toHaveBeenCalledOnce();
-    expect(player.src).toContain("leopold");
-    get("id", "message").onChange!({
-      target: { value: "@burry why are you bearish on PLTR?" },
-    });
-    expect(get("id", "message").disabled).toBe(false);
-    expect(get("aria-label", "Send message").disabled).toBe(false);
-    submit("chat-form");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(streamCouncil).toHaveBeenLastCalledWith(
-      "/api/council/chat",
-      {
-        run_id: "parent",
-        text: "@burry why are you bearish on PLTR?",
-        to: [],
-        roast: false,
-      },
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
-    expect(player.pause).toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(player.play).toHaveBeenCalledOnce(); // the queued buffett line was dropped
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it.each([false, true])(
-    "reports and releases audio with no progress (started: %s)",
-    async (started) => {
-      const player = audioPlayer();
-      if (!started)
-        player.play.mockImplementation(() => new Promise<void>(() => {}));
-      spokenStream();
-      submit("chat-form");
-      await vi.advanceTimersByTimeAsync(0);
-      if (started) {
-        player.onplaying!();
-        await vi.advanceTimersByTimeAsync(10000);
-        player.currentTime = 10;
-        player.ontimeupdate!();
-      }
-      for (let i = 0; i < 5; i++) {
-        await vi.advanceTimersByTimeAsync(5000);
-        player.ontimeupdate?.();
-      }
-      expect(player.pause).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(player.pause).toHaveBeenCalledOnce();
-      expect(get("className", "audio-note").children).toContain("timed out");
-      expect(get("aria-label", "Send message")).toBeDefined();
-      expect(vi.getTimerCount()).toBe(0);
-    },
-  );
-
-  it.each(["error", "autoplay rejection", "pause", "cancel"])(
-    "releases playback and its timer after %s",
-    async (reason) => {
-      const player = audioPlayer();
-      if (reason === "autoplay rejection")
-        player.play.mockRejectedValue(new Error("Not allowed"));
-      spokenStream(reason === "cancel");
-      submit("chat-form");
-      await vi.advanceTimersByTimeAsync(0);
-      if (reason === "error") player.onerror!();
-      if (reason === "pause") player.pause();
-      if (reason === "cancel") get("aria-label", "Cancel session").onClick!();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(player.pause).toHaveBeenCalled();
-      if (reason === "error")
-        expect(get("className", "audio-note").children).toContain(
-          "unavailable",
-        );
-      if (reason === "autoplay rejection")
-        expect(get("className", "audio-note").children).toContain(
-          "automatically",
-        );
-      if (reason === "cancel")
-        expect(get("className", "error").children).toContain("cancelled");
-      expect(player.ontimeupdate).toBeNull();
-      expect(player.onplaying).toBeNull();
-      expect(vi.getTimerCount()).toBe(0);
-    },
-  );
-
-  it.each(["disabled", "unknown"])(
-    "never loads audio when voice capability is %s",
-    async (capability) => {
-      vi.mocked(fetch).mockImplementation(async () =>
-        Response.json({
-          brief_id: "brief",
-          summary: "Portfolio received",
-          ...(capability === "disabled" ? { voice: false } : {}),
-        }),
-      );
-      const player = audioPlayer();
-      spokenStream();
-      submit("chat-form");
-      await vi.advanceTimersByTimeAsync(1200);
-      expect(player.play).not.toHaveBeenCalled();
-      expect(player.src).toBe("");
-      expect(get("aria-label", "Send message")).toBeDefined();
-    },
-  );
-
-  it("stops requesting voice after a playback failure", async () => {
-    const player = audioPlayer();
-    vi.mocked(streamCouncil).mockImplementationOnce(
-      async (_, __, ___, receive) => {
-        for (const member of ["leopold", "buffett"] as const)
-          await receive({
-            event: "member.audio",
-            data: { member, audio_url: `/api/voice/speak?member=${member}` },
-          });
-        await receive({ event: "run.done", data: { run_id: "parent" } });
-      },
-    );
-    submit("chat-form");
-    await vi.advanceTimersByTimeAsync(0);
-    player.onerror!();
     await vi.advanceTimersByTimeAsync(1200);
-    expect(player.play).toHaveBeenCalledOnce();
-    expect(player.src).toContain("leopold");
-    expect(get("aria-label", "Council voice playback").controls).toBe(false);
-    expect(get("aria-label", "Send message")).toBeDefined();
+    expect(toggle).not.toHaveBeenCalled();
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([url]) => String(url).includes("/voice/")),
+    ).toBe(false);
+    hooks.next = 0;
+    const html = renderToStaticMarkup(App());
+    expect(html).not.toContain("<audio");
+    expect(html).not.toContain("Sound on");
+    get("type", ReadAloud).onClick!();
+    expect(toggle).toHaveBeenCalledWith("chat-1", "buffett", verdict.headline);
   });
-
-  it("still times out a server that stops responding after speech", async () => {
-    const player = audioPlayer();
-    vi.mocked(streamCouncil).mockImplementationOnce(
-      async (_, __, signal, receive) => {
-        await receive({
-          event: "member.audio",
-          data: { member: "buffett", audio_url: "/api/voice/speak" },
-        });
-        await new Promise<void>((_, reject) => {
-          signal.addEventListener("abort", () => reject(signal.reason));
-        });
-      },
-    );
-    submit("chat-form");
-    await vi.advanceTimersByTimeAsync(0);
-    player.onended!();
-    await vi.advanceTimersByTimeAsync(180000);
-    expect(get("className", "error").children).toContain("timed out");
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it.each(["timeout", "ended", "pause", "cancel"])(
-    "ignores settled callbacks and source-replacement rejection after %s",
-    async (reason) => {
-      const player = audioPlayer();
-      player.pause.mockImplementation(() => {});
-      let rejectFirst!: (reason: Error) => void;
-      player.play.mockImplementationOnce(
-        () =>
-          new Promise<void>((_, reject) => {
-            rejectFirst = reject;
-          }),
-      );
-      let source = "";
-      Object.defineProperty(player, "src", {
-        get: () => source,
-        set: (value: string) => {
-          const replacing = !!source;
-          source = value;
-          if (replacing)
-            queueMicrotask(() =>
-              rejectFirst(new DOMException("Source replaced", "AbortError")),
-            );
-        },
-      });
-      vi.mocked(streamCouncil).mockImplementationOnce(
-        async (_, __, signal, receive) => {
-          await receive({ event: "run.started", data: { run_id: "parent" } });
-          for (const member of ["leopold", "buffett"] as const) {
-            await receive({
-              event: "member.audio",
-              data: { member, audio_url: `/api/voice/speak?member=${member}` },
-            });
-            signal.throwIfAborted();
-          }
-          if (reason === "cancel")
-            await new Promise<void>((_, reject) =>
-              signal.addEventListener("abort", () => reject(signal.reason)),
-            );
-          await receive({ event: "run.done", data: { run_id: "parent" } });
-        },
-      );
-      submit("chat-form");
-      await vi.advanceTimersByTimeAsync(0);
-      const previous = {
-        ended: player.onended!,
-        pause: player.onpause!,
-        playing: player.onplaying!,
-        progress: player.ontimeupdate!,
-        error: player.onerror!,
-      };
-      if (reason === "timeout") await vi.advanceTimersByTimeAsync(30000);
-      else if (reason === "cancel")
-        get("aria-label", "Cancel session").onClick!();
-      else if (reason === "ended") previous.ended();
-      else previous.pause();
-      await vi.advanceTimersByTimeAsync(0);
-      if (reason === "cancel") {
-        spokenStream();
-        submit("chat-form");
-        await vi.advanceTimersByTimeAsync(0);
-      }
-      expect(player.play).toHaveBeenCalledTimes(2);
-      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 2 : 1);
-      expect(player.src).not.toContain("leopold");
-      const nextEnded = player.onended;
-      const nextProgress = player.ontimeupdate;
-      expect(nextEnded).toBeTypeOf("function");
-      player.currentTime = 1;
-      for (const callback of Object.values(previous)) callback();
-      expect(player.onended).toBe(nextEnded);
-      expect(player.ontimeupdate).toBe(nextProgress);
-      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 2 : 1);
-      if (reason === "timeout")
-        expect(get("className", "audio-note").children).toContain("timed out");
-      else expect(() => get("className", "audio-note")).toThrow("Missing");
-      player.onplaying!();
-      for (let i = 0; i < 4; i++) {
-        await vi.advanceTimersByTimeAsync(10000);
-        player.currentTime += 10;
-        player.ontimeupdate!();
-      }
-      expect(player.pause).toHaveBeenCalledTimes(reason === "cancel" ? 2 : 1);
-      player.onended!();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(get("aria-label", "Send message")).toBeDefined();
-      expect(vi.getTimerCount()).toBe(0);
-    },
-  );
 });
