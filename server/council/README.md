@@ -160,7 +160,7 @@ turn goes through one loop:
  [Answer] each chosen member: reuse the run's sources, or search again if the question needs new facts
         │
         v
- [Reply] streamed text in chat (+ that member's text-to-speech), one speaker at a time
+ [Reply] streamed text in chat (playback controls: see the web journey linked below)
         │
         v
  [Close] coordinator hands the floor back to the user, refreshes the chips
