@@ -62,7 +62,7 @@ def profile_line(persona: str) -> str:
     return next((ln for ln in plain if ln and not ln.startswith(("#", "|", "-", "_"))), "")[:80]
 
 
-def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float, net_worth: float | None) -> dict:
+def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float | None, net_worth: float | None) -> dict:
     """Pre-computed portfolio facts so agents never do arithmetic."""
     rows = []
     for h in holdings:
@@ -99,20 +99,20 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float, ne
         "losers": sum(r["pnl_pct"] < 0 for r in rows) if complete_pnl else None,
         "best": max(rows, key=lambda r: r["pnl_pct"])["ticker"] if rows and complete_pnl else None,
         "worst": min(rows, key=lambda r: r["pnl_pct"])["ticker"] if rows and complete_pnl else None,
+        "broker_cash": round(broker_cash, 2) if broker_cash is not None else None,
     }
     weighted = lambda k: sum(r[k] * r["value"] for r in rows) / value  # noqa: E731  exact weights, not rounded ones
     if value and all("beta" in r for r in rows):
         out["portfolio_beta"] = round(weighted("beta"), 2)
     if value and all("div_yield" in r for r in rows):
         out["est_yield_pct"] = round(weighted("div_yield"), 2)
-    if broker_cash:
-        out["broker_cash"] = round(broker_cash, 2)
-        if value is not None:
-            out["broker_equity"] = round(value + broker_cash, 2)
+    if broker_cash is not None and value is not None:
+        out["broker_equity"] = round(value + broker_cash, 2)
+        if value + broker_cash:
             out["broker_cash_pct"] = round(broker_cash / (value + broker_cash) * 100, 1)
     if net_worth is not None:
         out["net_worth"] = net_worth
-        if net_worth and value is not None:
+        if net_worth and value is not None and broker_cash is not None:
             out["brokerage_pct_of_net_worth"] = round((value + broker_cash) / net_worth * 100, 1)
     return out
 
@@ -123,16 +123,20 @@ async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, accou
     tickers = [h["ticker"] for h in holdings]
     last = prices if prices is not None else await market.prices(tickers, {h["ticker"]: h.get("price", h["cost_basis"]) for h in holdings})
     last.update({h["ticker"]: h["price"] for h in holdings if h.get("price") is not None})
-    broker_cash = float((account or {}).get("cash") or 0)
+    broker_cash = (account or {}).get("cash")
+    if broker_cash is not None:
+        broker_cash = float(broker_cash)
     f = facts(holdings, last, broker_cash, net_worth)
     bank = await plaid.sandbox_balances() if use_plaid else None
     shown = ", ".join(tickers[:4]) + (f" +{len(tickers) - 4} more" if len(tickers) > 4 else "")
     valuation = f"${f['holdings_value']:,.0f} in {shown}" if f["holdings_value"] is not None else f"{shown}: total valuation unavailable"
     profit = f"{f['unrealized_pl_pct']:+.0f}%" if f["unrealized_pl_pct"] is not None else "profit/loss unavailable"
     parts = [f"{valuation}, {profit}"]
-    cash = broker_cash + (bank["cash"] if bank else 0)
-    if cash:
+    if broker_cash is not None:
+        cash = broker_cash + (bank["cash"] if bank else 0)
         parts.append(f"${cash:,.0f} cash")
+    elif bank:
+        parts.append(f"${bank['cash']:,.0f} bank cash")
     if profile := profile_line(persona):
         parts.append(profile)
     if note:

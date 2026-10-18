@@ -1,10 +1,11 @@
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
 
 from app.services import ingest, llm, profile, store
-from tests.conftest import PERSONA, PORTFOLIO, run_council
+from tests.conftest import PERSONA, PORTFOLIO, parse_sse, run_council
 
 
 def test_ingest_csv_summary(client):
@@ -12,7 +13,7 @@ def test_ingest_csv_summary(client):
     assert r.status_code == 200
     body = r.json()
     assert body["brief_id"]
-    assert body["summary"] == "$10,000 in VOO, -30%; $4,200 cash; 10-year horizon, moderate risk"
+    assert body["summary"] == "$10,000 in VOO, -30%; $4,200 bank cash; 10-year horizon, moderate risk"
 
 
 def test_ingest_json_without_plaid(client):
@@ -218,10 +219,7 @@ def test_ingest_text_uses_explicit_net_worth_not_goal_text(client, model, net_wo
     body = client.post("/api/ingest/text", json={"text": text}).json()
     facts = ingest.BRIEFS[body["brief_id"]]["facts"]
     assert facts.get("net_worth") == net_worth
-    if net_worth:
-        assert facts["brokerage_pct_of_net_worth"] == round(8000 / net_worth * 100, 1)
-    else:
-        assert "brokerage_pct_of_net_worth" not in facts
+    assert "brokerage_pct_of_net_worth" not in facts
 
 
 @pytest.mark.parametrize("lots, text, shares, amount, basis", [
@@ -257,3 +255,149 @@ def test_ingest_text_consolidates_lots_without_losing_unknowns(client, model, mo
     assert events[-1][0] == "run.done"
     ruling = next(data for event, data in events if event == "chair.summary")
     assert len(ruling["positions"]) == 1
+
+
+@pytest.mark.parametrize("cash", [None, 0, 12000])
+@pytest.mark.parametrize("valued", [False, True])
+def test_ingest_text_preserves_unknown_and_zero_cash(client, model, cash, valued):
+    position = {"ticker": "VOO", "shares": None if valued else 10,
+                "cost_basis": None if valued else 100, "amount": 8000 if valued else None}
+    model["value"] = _profile(name=None, age=None, cash=cash, net_worth=100000,
+                              goals=None, horizon=None, risk=None, positions=[position])
+    text = ("$8k in VOO" if valued else "10 shares of VOO at $100") + "; net worth $100k"
+    if cash is not None:
+        text += f"; ${cash} cash"
+    response = client.post("/api/ingest/text", json={"text": text})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    brief = ingest.BRIEFS[body["brief_id"]]
+    facts = brief["facts"]
+    assert brief["account"] == ({"cash": cash} if cash is not None else None)
+    assert facts["broker_cash"] == cash
+    assert ("cash" in body["missing"]) is (cash is None)
+    if cash is None:
+        assert not any(line.startswith("Cash:") for line in body["card"]["lines"])
+    else:
+        assert f"Cash: ${cash:,.0f}" in body["card"]["lines"]
+        assert f"${cash:,.0f} cash" in body["summary"]
+    if cash is not None and valued:
+        assert facts["broker_equity"] == 8000 + cash
+        assert facts["broker_cash_pct"] == round(cash / (8000 + cash) * 100, 1)
+        assert facts["brokerage_pct_of_net_worth"] == round((8000 + cash) / 100000 * 100, 1)
+    else:
+        assert {"broker_equity", "broker_cash_pct", "brokerage_pct_of_net_worth"}.isdisjoint(facts)
+    persisted = json.loads(store._mem["brief", body["brief_id"]])
+    assert persisted["account"] == brief["account"]
+    assert persisted["facts"] == facts
+
+
+@pytest.mark.parametrize("account", [None, {}, {"cash": None}, {"cash": 0}, {"cash": 12000}])
+@pytest.mark.parametrize("plaid", [False, True])
+def test_ingest_upload_preserves_unknown_cash_with_separate_bank_balances(client, account, plaid):
+    portfolio = {"positions": [{"symbol": "VOO", "qty": 1, "avg_entry_price": 6000, "current_price": 8000}],
+                 "account": account}
+    response = client.post("/api/ingest", files={"portfolio": ("p.json", json.dumps(portfolio)),
+                                               "persona": ("p.md", "# Profile\n| **Total Net Worth** | $100,000 |")},
+                           data={"plaid": str(plaid).lower()})
+    assert response.status_code == 200, response.text
+    brief = ingest.BRIEFS[response.json()["brief_id"]]
+    facts = brief["facts"]
+    cash = account.get("cash") if account else None
+    assert facts["broker_cash"] == cash
+    assert brief["account"] == account
+    if cash is None:
+        assert {"broker_equity", "broker_cash_pct", "brokerage_pct_of_net_worth"}.isdisjoint(facts)
+        assert brief["summary"] == "$8,000 in VOO, +33%" + ("; $4,200 bank cash" if plaid else "")
+    else:
+        assert facts["broker_equity"] == 8000 + cash
+        assert facts["broker_cash_pct"] == round(cash / (8000 + cash) * 100, 1)
+        assert facts["brokerage_pct_of_net_worth"] == round((8000 + cash) / 100000 * 100, 1)
+        assert f"${cash + (4200 if plaid else 0):,.0f} cash" in brief["summary"]
+
+
+def test_zero_equity_has_no_undefined_cash_percentage():
+    facts = ingest.facts([{"ticker": "VOO", "shares": 1, "cost_basis": 100}], {"VOO": 0}, 0, 100000)
+    assert facts["broker_cash"] == facts["broker_equity"] == facts["brokerage_pct_of_net_worth"] == 0
+    assert "broker_cash_pct" not in facts
+
+
+@pytest.mark.parametrize("failure", ["disabled", "analysis", "advice", "both", "none"])
+@pytest.mark.parametrize("roast", [False, True])
+def test_missing_performance_fallback_covers_verdict_speech_and_chat(client, model, monkeypatch, failure, roast):
+    model["value"] = _profile(name=None, age=None, cash=None, goals=None, horizon=None, risk=None,
+                              positions=[{"ticker": "VOO", "shares": None, "cost_basis": None, "amount": 8000}])
+    response = client.post("/api/ingest/text", json={"text": "$8k in VOO"})
+    assert response.status_code == 200, response.text
+    gap = "Current valuation or profit/loss is unavailable; missing prices and cost basis must be supplied before assessing concentration or performance."
+
+    async def complete(system, user, response_format=None):
+        if "Stage 1, portfolio analysis." in system:
+            if failure in ("analysis", "both"):
+                raise ValueError("analysis unavailable")
+            return {"headline": "Profile received", "analysis": "This profile includes VOO.",
+                    "reasons": ["VOO is supplied by the user."], "names": ["VOO"]}
+        if "Stage 3, advice." in system:
+            if failure in ("advice", "both"):
+                raise ValueError("advice unavailable")
+            return {"positions": [{"ticker": "VOO", "signal": "HOLD", "conviction": "low",
+                                    "rationale": "Current performance is unavailable."}],
+                    "advice": [{"action": "Provide current values", "why": "Performance is unavailable."}]}
+        return {}
+
+    async def failed_reply(*args):
+        raise ValueError("chat unavailable")
+
+    monkeypatch.setattr(llm, "complete_json", complete)
+    monkeypatch.setattr(llm, "complete_reply", failed_reply)
+    if failure == "disabled":
+        monkeypatch.delenv("NICRRON_API_KEY")
+    run_id, events = run_council(client, response.json()["brief_id"], roast=roast)
+    assert events[-1][0] == "run.done"
+    assert "run.error" not in [event for event, _ in events]
+    analyses = [data for event, data in events if event == "member.analysis"]
+    verdicts = [data for event, data in events if event == "member.verdict"]
+    assert len(analyses) == len(verdicts) == 5
+    analysis_fallback = failure in ("disabled", "analysis", "both")
+    for analysis in analyses:
+        assert analysis["headline"] == (gap if analysis_fallback else "Profile received")
+        assert analysis["analysis"] == (gap if analysis_fallback else "This profile includes VOO.")
+    advice_fallback = failure in ("disabled", "advice", "both")
+    for verdict in verdicts:
+        assert verdict["headline"] == (gap if analysis_fallback or advice_fallback else "Profile received")
+        if advice_fallback:
+            assert verdict["analysis"] == gap
+            assert verdict["reasons"] == [gap]
+            assert verdict["advice"] == [{"action": gap, "why": gap, "tickers": []}]
+        else:
+            assert verdict["advice"][0]["action"] == "Provide current values"
+    member_audio = [data for event, data in events if event == "member.audio" and data["member"] != "chair"]
+    assert len(member_audio) == 5
+    for audio in member_audio:
+        spoken = parse_qs(urlsplit(audio["audio_url"]).query)["text"][0]
+        expected = gap + ". " + gap if analysis_fallback or advice_fallback else "Profile received. This profile includes VOO."
+        assert spoken.startswith(expected)
+    for member in ("buffett", "dalio", "burry", "leopold", "cramer"):
+        chat_response = client.post("/api/council/chat", json={"run_id": run_id, "text": "Discuss VOO", "to": [member], "roast": roast})
+        chat_events = parse_sse(chat_response.text)
+        assert chat_events[-1][0] == "run.done"
+        replies = [data["text"] for event, data in chat_events if event == "member.reply"]
+        assert replies == [gap]
+        audio = next(data for event, data in chat_events if event == "member.audio")
+        assert parse_qs(urlsplit(audio["audio_url"]).query)["text"] == [gap]
+
+
+@pytest.mark.parametrize("roast", [False, True])
+def test_complete_demo_keeps_its_canned_verdict_and_chat(client, jordan_brief_id, roast):
+    run_id, events = run_council(client, jordan_brief_id, roast=roast)
+    assert events[-1][0] == "run.done"
+    verdict = next(data for event, data in events if event == "member.verdict" and data["member"] == "burry")
+    headline = "I shorted a housing bubble; you built a portfolio-shaped one." if roast else "The biggest winner has become the biggest risk"
+    assert verdict["headline"] == headline
+    assert verdict["advice"][0]["why"] == "Concentration after a big run."
+    audio = next(data for event, data in events if event == "member.audio" and data["member"] == "burry")
+    assert parse_qs(urlsplit(audio["audio_url"]).query)["text"][0].startswith(headline)
+    response = client.post("/api/council/chat", json={"run_id": run_id, "text": "Discuss PLTR", "to": ["burry"], "roast": roast})
+    chat_events = parse_sse(response.text)
+    assert chat_events[-1][0] == "run.done"
+    reply = next(data["text"] for event, data in chat_events if event == "member.reply")
+    assert reply.startswith(headline)

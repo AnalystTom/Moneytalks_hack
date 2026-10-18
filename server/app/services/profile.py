@@ -162,7 +162,7 @@ def card(profile: Profile, f: dict, gaps: list[str]) -> dict:
             lines.append(f"{holding['ticker']}: " + ", ".join(details))
     if f["unrealized_pl_pct"] is None:
         lines.append("Profit/loss unavailable: current prices or cost basis not provided")
-    if f.get("broker_cash"):
+    if f.get("broker_cash") is not None:
         lines.append(f"Cash: ${f['broker_cash']:,.0f}")
     if profile.goals:
         lines.append(f"Goal: {profile.goals}" + (f" in {profile.horizon}" if profile.horizon else ""))
@@ -195,9 +195,8 @@ async def build(text: str) -> dict:
                     "position_field_count": sum(v is not None for p in profile.positions for v in p.model_dump().values()) if profile else 0}
         await prism.trace(session, "council.ingest_text", "", json.dumps(metadata), [], ok=ok, model=llm.model(), span_type="llm")
     gaps = missing(profile)
-    cash = profile.cash or 0
     brief_id, summary = await ingest.build_brief(
-        holdings(profile), persona(profile, gaps), False, {"cash": cash} if cash else None,
+        holdings(profile), persona(profile, gaps), False, {"cash": profile.cash} if profile.cash is not None else None,
         note=f"not given: {', '.join(gaps)}" if gaps else "",
         prices={}, net_worth=profile.net_worth,
     )
