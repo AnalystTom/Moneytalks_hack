@@ -75,9 +75,7 @@ curl -F portfolio=@../data/portfolio.json -F persona=@../data/PERSONA.md localho
 printf 'ticker,shares,cost_basis\nVOO,20,714.29\n' > portfolio.csv
 printf '# Alex\n10-year horizon, moderate risk\n' > persona.md
 curl -F portfolio=@portfolio.csv -F persona=@persona.md -F plaid=true localhost:8000/api/ingest
-# ingest from one block of free text (needs NICRRON_API_KEY): the model only extracts, every number must appear in the text
-curl -H 'content-type: application/json' -d '{"text":"I am Sam, 31. 40 shares of AAPL at $150, $8k in VOO, $12k cash. Goal: house deposit in 5 years."}' localhost:8000/api/ingest/text
-# -> {"brief_id":"...","summary":"$10,000 in VOO, -30%; $4,200 cash; 10-year horizon, moderate risk"}
+# -> {"brief_id":"...","summary":"$10,000 in VOO, -30%; $4,200 bank cash; 10-year horizon, moderate risk"}
 
 # council run (SSE); add "roast": true for roast mode
 curl -N -X POST localhost:8000/api/council/run -H 'content-type: application/json' \
@@ -113,6 +111,31 @@ per speaker `member.reply` (`member`, `text`, `sources`) and its audio triple; `
 Payload schemas live in [`app/models.py`](app/models.py); coordinator behavior is described in
 [council/README.md](council/README.md). The frontend's presentation and follow-up controls are documented
 in the [web journey](../web/README.md#journey).
+
+### Personal details
+
+`POST /api/ingest/text` accepts one JSON `text` string (1–4,000 characters). It needs `NICRRON_API_KEY`
+to extract a profile and at least one holding with a ticker and a share count or dollar amount.
+Request validation or rejected extraction returns 422; an unconfigured model returns 503;
+model HTTP failures return 502. Extraction schemas and validation live in
+[`app/services/profile.py`](app/services/profile.py).
+
+```sh
+curl -H 'content-type: application/json' \
+  -d '{"text":"I am Sam, 31. 40 shares of AAPL at $150, $8k in VOO, $12k cash. Goal: house deposit in 5 years."}' \
+  localhost:8000/api/ingest/text
+```
+
+The response adds a context `card` and a `missing` list to the usual `brief_id` and `summary`.
+Reported dollar amounts stay amounts; this path fetches no market prices and connects no bank account.
+Repeated tickers are consolidated, retaining supplied lots; totals and share-weighted cost basis are
+calculated only when all required lot values are present. Missing shares, cost basis and profile details
+remain unknown and are called out on the card. Valuation and profit/loss are marked unavailable when
+their inputs are absent. Missing cash stays unknown; explicit zero cash is retained. Cash-dependent
+totals and ratios require known cash and holdings value; brokerage/net-worth ratios also require nonzero net worth.
+
+The submitted text goes to Nicrron; the resulting brief is stored as described under [D1 database](#d1-database).
+The ingest call's PRISM metadata policy is documented in [PRISM proofs](../docs/prism.md).
 
 ## Known limits
 
