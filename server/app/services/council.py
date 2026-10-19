@@ -54,8 +54,6 @@ def _etf(p: dict) -> bool:
 def _call(member: str, p: dict) -> tuple[str, str, str]:
     """Canned per-name decision through each lens: (signal, conviction, rationale), numbers from the brief."""
     t, w, pnl, spec = p["ticker"], p["weight_pct"], p["pnl_pct"], p.get("role") == "speculative"
-    if w is None or pnl is None:
-        return "HOLD", "low", f"{t}: valuation or profit/loss is unavailable; provide current value and cost basis before a size or performance-based call."
     if member == "buffett":
         if _etf(p):
             return "BUY", "high", f"{t}: a low-cost index is the one thing everybody should keep buying."
@@ -229,7 +227,8 @@ async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bo
     fallback = an.model_copy(update={"headline": gap, "analysis": gap, "reasons": [gap]}) if gap else an
     canned = Verdict(**fallback.model_dump(), sources=sources,
                      advice=[Advice(action=gap, why=gap) if gap else CANNED_ADVICE[member]], positions=[
-        PositionCall(ticker=t, **dict(zip(("signal", "conviction", "rationale"), _call(member, pos[t])))) for t in an.names
+        PositionCall(ticker=t, **dict(zip(("signal", "conviction", "rationale"), _call(member, pos[t]))))
+        for t in an.names if pos[t]["weight_pct"] is not None and pos[t]["pnl_pct"] is not None
     ])
     if llm.enabled():
         system = f"You are this council member:\n{_persona(member)}\n{ADVICE_SCHEMA}"
@@ -270,6 +269,8 @@ async def _member(member: str, run_id: str, brief: dict, a: Assignment, roast: b
 
 async def _rule(run_id: str, brief: dict, roast: bool, verdicts: dict[str, Verdict]) -> Chair:
     canned = coordinator.rule(verdicts, brief, roast)
+    if not canned.positions and (gap := _performance_gap(brief["facts"])):
+        return canned.model_copy(update={"consensus": gap, "summary": gap + " Parody council, not financial advice."})
     if not llm.enabled():
         return canned
     system = (
@@ -470,6 +471,8 @@ async def _chair_answer(run: dict, text: str) -> str:
 def _canned_chair(run: dict) -> str:
     chair: Chair | None = run["chair"]
     verdicts = run["verdicts"]
+    if not any(v.positions for v in verdicts.values()) and (gap := _performance_gap(run["brief"]["facts"])):
+        return gap
     count = lambda sig: {m: sum(p.signal == sig for p in v.positions) for m, v in verdicts.items()}  # noqa: E731
     most = lambda sig: max(count(sig).items(), key=lambda mc: mc[1], default=(None, 0))  # noqa: E731
     (bull, nb), (bear, ns) = most("BUY"), most("SELL")

@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 
-from app.services import ingest, llm, profile, store
+from app.services import council, ingest, llm, profile, store
 from tests.conftest import PERSONA, PORTFOLIO, parse_sse, run_council
 
 
@@ -150,7 +150,7 @@ def test_ingest_text_brief_drives_council(client, model, monkeypatch):
     verdicts = [data for event, data in events if event == "member.verdict"]
     assert len(verdicts) == 5
     assert all("unavailable" in v["analysis"] for v in verdicts)
-    assert all("unavailable" in p["rationale"] for v in verdicts for p in v["positions"])
+    assert all(v["positions"] == [] for v in verdicts)
 
 
 @pytest.mark.parametrize("failure", [None, "validation", "schema", "provider"])
@@ -254,7 +254,7 @@ def test_ingest_text_consolidates_lots_without_losing_unknowns(client, model, mo
     events = run_council(client, response.json()["brief_id"])[1]
     assert events[-1][0] == "run.done"
     ruling = next(data for event, data in events if event == "chair.summary")
-    assert len(ruling["positions"]) == 1
+    assert ruling["positions"] == []
 
 
 @pytest.mark.parametrize("cash", [None, 0, 12000])
@@ -368,6 +368,7 @@ def test_missing_performance_fallback_covers_verdict_speech_and_chat(client, mod
             assert verdict["analysis"] == gap
             assert verdict["reasons"] == [gap]
             assert verdict["advice"] == [{"action": gap, "why": gap, "tickers": []}]
+            assert verdict["positions"] == []
         else:
             assert verdict["advice"][0]["action"] == "Provide current values"
     member_audio = [data for event, data in events if event == "member.audio" and data["member"] != "chair"]
@@ -375,7 +376,27 @@ def test_missing_performance_fallback_covers_verdict_speech_and_chat(client, mod
     for audio in member_audio:
         spoken = parse_qs(urlsplit(audio["audio_url"]).query)["text"][0]
         expected = gap + ". " + gap if analysis_fallback or advice_fallback else "Profile received. This profile includes VOO."
-        assert spoken.startswith(expected)
+        assert spoken == expected + (" HOLD VOO." if not advice_fallback else "")
+    ruling = next(data for event, data in events if event == "chair.summary")
+    if advice_fallback:
+        assert ruling == {
+            "positions": [], "dissent": [], "consensus": gap,
+            "summary": gap + " Parody council, not financial advice.",
+            "actions": [gap + " (Warren, Ray, Michael, Leopold, Jim)"],
+            "suggestions": ["Michael, why worry about VOO?", "What should I do with my savings?"],
+        }
+    else:
+        assert len(ruling["positions"]) == 1
+        assert ruling["positions"][0]["ticker"] == "VOO"
+        assert ruling["positions"][0]["calls"] == {v["member"]: "HOLD" for v in verdicts}
+    chair_audio = next(data for event, data in events if event == "member.audio" and data["member"] == "chair")
+    assert parse_qs(urlsplit(chair_audio["audio_url"]).query)["text"] == [ruling["summary"]]
+    persisted = json.loads(store._mem["run", run_id])
+    assert persisted["chair"] == ruling
+    assert {m: v["positions"] for m, v in persisted["verdicts"].items()} == {v["member"]: v["positions"] for v in verdicts}
+    spoken_history = {h["role"]: h["text"] for h in persisted["history"] if h["role"] != "user"}
+    for audio in [*member_audio, chair_audio]:
+        assert spoken_history[audio["member"]] == parse_qs(urlsplit(audio["audio_url"]).query)["text"][0]
     for member in ("buffett", "dalio", "burry", "leopold", "cramer"):
         chat_response = client.post("/api/council/chat", json={"run_id": run_id, "text": "Discuss VOO", "to": [member], "roast": roast})
         chat_events = parse_sse(chat_response.text)
@@ -383,6 +404,16 @@ def test_missing_performance_fallback_covers_verdict_speech_and_chat(client, mod
         replies = [data["text"] for event, data in chat_events if event == "member.reply"]
         assert replies == [gap]
         audio = next(data for event, data in chat_events if event == "member.audio")
+        assert parse_qs(urlsplit(audio["audio_url"]).query)["text"] == [gap]
+
+    if advice_fallback:
+        council.RUNS.pop(run_id)
+        response = client.post("/api/council/chat", json={"run_id": run_id, "text": "Who was most bullish?", "roast": roast})
+        chair_events = parse_sse(response.text)
+        assert chair_events[-1][0] == "run.done"
+        assert next(data["members"] for event, data in chair_events if event == "chat.routed") == ["chair"]
+        assert [data["text"] for event, data in chair_events if event == "member.reply"] == [gap]
+        audio = next(data for event, data in chair_events if event == "member.audio")
         assert parse_qs(urlsplit(audio["audio_url"]).query)["text"] == [gap]
 
 
@@ -401,3 +432,26 @@ def test_complete_demo_keeps_its_canned_verdict_and_chat(client, jordan_brief_id
     assert chat_events[-1][0] == "run.done"
     reply = next(data["text"] for event, data in chat_events if event == "member.reply")
     assert reply.startswith(headline)
+
+
+@pytest.mark.parametrize("unknown_value", [False, True])
+@pytest.mark.asyncio
+async def test_partial_portfolio_fallback_only_votes_with_known_weight_and_performance(client, unknown_value):
+    holdings = [{"ticker": "AAPL", "shares": 10, "cost_basis": 150, "amount": None},
+                {"ticker": "VOO", "shares": 10 if unknown_value else None, "cost_basis": None,
+                 "amount": None if unknown_value else 8000}]
+    brief_id, _ = await ingest.build_brief(holdings, "", False, prices={"AAPL": 230})
+    run_id, events = run_council(client, brief_id)
+    assert events[-1][0] == "run.done"
+    verdicts = [data for event, data in events if event == "member.verdict"]
+    expected = set() if unknown_value else {"AAPL"}
+    assert all({p["ticker"] for p in v["positions"]} == expected for v in verdicts)
+    ruling = next(data for event, data in events if event == "chair.summary")
+    assert {p["ticker"] for p in ruling["positions"]} == expected
+    for audio in (data for event, data in events if event == "member.audio"):
+        spoken = parse_qs(urlsplit(audio["audio_url"]).query)["text"][0]
+        assert not any(f"{signal} VOO" in spoken for signal in ("BUY", "HOLD", "SELL"))
+    response = client.post("/api/council/chat", json={"run_id": run_id, "text": "Who was most bullish?"})
+    replies = [data["text"] for event, data in parse_sse(response.text) if event == "member.reply"]
+    assert len(replies) == 1
+    assert not any(f"{signal} VOO" in replies[0] for signal in ("BUY", "HOLD", "SELL"))
