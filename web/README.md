@@ -32,9 +32,11 @@ Five cartoon members sit around the curved table, including Ray Dalio. The coord
 
 Bubbles preview the server's `speech_bubble` field when returned, otherwise the verdict headline or council summary. Either input is shortened to its first sentence, capped at fifteen words and 100 characters before any added ellipsis. Select a bubble, portrait or nameplate to view the full analysis, per-ticker calls and rationale, reasons and valid sources. Calls retain the supplied `low` / `mid` / `high` conviction labels; no numeric confidence is inferred. The bubble signal summarizes the majority of returned calls, with ties going to the first call. Without calls it stays pending, and verdict details show "No calls returned." The council's final details include per-name signals and conviction labels, summary, consensus, dissent and actions. Chat history retains earlier returned answers.
 
-Voice is loaded only when `/api/health` explicitly reports `voice: true` and sound is enabled. Actual playback starts and stops the speaking pose; text-only runs use a short speaking beat. Playback failures disable further audio loads for that run. A clip with no playback progress for 30 seconds releases the stream. Pausing or cancelling releases playback.
+Answers never play automatically. Tap the speaker beside a scene bubble or member/chair message to hear its text. The coordinator's ruling uses the chair voice. The icon shows loading, then a stop button during playback; tap again to cancel or stop. Starting another answer, sending a question, replacing context, or recording stops the previous clip and cancels pending speech. Long answers are read in endpoint-sized chunks. Provider/playback failures show an explicit error and allow retry. There is no global player or sound toggle.
 
-Use **Speak your question** above the composer to record a question, then **Stop recording** to transcribe it with ElevenLabs Scribe v2. Review the text and send; existing composer text is preserved. Reply to a member message for a spoken follow-up. Capture pauses previous audio to avoid recording it, stops at sixty seconds, and releases the microphone on errors or unmount. Microphone access needs HTTPS or localhost; provider errors leave typed input intact. See [server voice setup](../server/README.md#voice-conversations) for credentials and privacy.
+At widths up to 800px, the scene and chat stack, the five seats scroll horizontally with one-line answer previews, and the composer stays at the bottom of the viewport while the transcript scrolls. When the keyboard reduces the available height, the scene and chat can scroll vertically to keep the composer and its controls reachable.
+
+Use **Speak your question** above the composer to record a question, then **Stop recording** to transcribe it with ElevenLabs Scribe v2. Review the text and send; existing composer text is preserved. Starting capture stops previous playback to avoid recording it. Capture stops at sixty seconds and releases the microphone on errors or unmount. Recordings are sent to ElevenLabs for transcription. Microphone access needs HTTPS or localhost; provider errors leave typed input intact. See [server environment settings](../server/README.md#env-names) for credentials.
 
 The checked-in context is demo data, not a connected bank account. The frontend never supplies financial verdicts, confidence, citations or balances itself and cannot certify the backend's research. Example-domain source URLs are excluded. See [deployment](../server/README.md#deploy-cloudflare) for backend storage limits. If context expires, Retry re-ingests the last accepted holdings and profile kept in this tab's memory; rejected replacements do not overwrite the accepted holdings. Refreshing clears the conversation and reloads the checked-in demo context.
 
@@ -46,9 +48,11 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npx playwright install chromium
+npm run test:browser
 ```
 
-GitHub Actions runs these checks plus the existing backend tests. The backend currently has no formatting, lint or typecheck scripts; adding them is separate work.
+GitHub Actions runs the format, lint, typecheck, unit tests and build checks plus the existing backend tests. The Playwright layout check is available through `test:browser`; set `COUNCIL_CHROMIUM_PATH` to an approved headless binary when using a preinstalled browser. The backend currently has no formatting, lint or typecheck scripts; adding them is separate work.
 
 ## Portrait asset
 

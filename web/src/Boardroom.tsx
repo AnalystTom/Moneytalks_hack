@@ -1,7 +1,8 @@
+import type { ReactNode } from "react";
 import { bubbleLine } from "./animation";
 import type { AnimationState } from "./animation";
 import { members, sourceUrl } from "./contract";
-import type { Chair, Member, Source, Verdict } from "./contract";
+import type { Chair, Member, Source, Speaker, Verdict } from "./contract";
 
 type Props = {
   active?: Member;
@@ -11,6 +12,7 @@ type Props = {
   sources: Partial<Record<Member, Source[]>>;
   chair?: Chair;
   onSelect: (member: Member) => void;
+  readAloud?: (id: string, member: Speaker, text: string) => ReactNode;
 };
 const seats: Member[] = ["leopold", "burry", "buffett", "dalio", "cramer"];
 
@@ -55,6 +57,7 @@ export default function Boardroom({
   sources,
   chair,
   onSelect,
+  readAloud,
 }: Props) {
   return (
     <div className="boardroom">
@@ -84,21 +87,33 @@ export default function Boardroom({
               data-pose={pose}
               aria-label={members[member].name}
             >
-              <button
-                key={ruling?.summary || verdict?.headline || "pending"}
-                className="speech-bubble"
-                onClick={() => onSelect(member)}
-                aria-label={`View ${members[member].name}: ${signal || "Pending"}. ${line}`}
-              >
-                <SignalIcon signal={signal} />
-                <span className="bubble-copy">
-                  <small>
-                    {ruling ? "Council ruling" : signal || "Pending"}
-                  </small>
-                  <span className="bubble-line">{line}</span>
-                  <span className="bubble-more">View more ↗</span>
-                </span>
-              </button>
+              <div className="bubble-wrap">
+                <button
+                  key={ruling?.summary || verdict?.headline || "pending"}
+                  className="speech-bubble"
+                  onClick={() => onSelect(member)}
+                  aria-label={`View ${members[member].name}: ${signal || "Pending"}. ${line}`}
+                >
+                  <SignalIcon signal={signal} />
+                  <span className="bubble-copy">
+                    <small>
+                      {ruling ? "Council ruling" : signal || "Pending"}
+                    </small>
+                    <span className="bubble-line">{line}</span>
+                    <span className="bubble-more">View more ↗</span>
+                  </span>
+                </button>
+                {(ruling || verdict) &&
+                  readAloud?.(
+                    `scene-${member}`,
+                    ruling ? "chair" : member,
+                    ruling?.speech_bubble ||
+                      ruling?.summary ||
+                      verdict?.speech_bubble ||
+                      verdict?.headline ||
+                      "",
+                  )}
+              </div>
               <button
                 className="member-portrait"
                 onClick={() => onSelect(member)}

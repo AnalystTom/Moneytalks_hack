@@ -55,8 +55,9 @@ Copy `../.env.example` to `../.env`; the server loads it on startup (shell varia
 | name | effect |
 |---|---|
 | `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); no key = canned events. An unset model or `nicrron/auto` selects `anthropic/claude-opus-5-5`; other model names are used as given |
-| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR` | `/api/voice/speak`; 503 until the key and that speaker's voice id are set |
-| `ELEVENLABS_MODEL` | speech model, default `eleven_multilingual_v2`; add to `.env` to override |
+| `ELEVENLABS_API_KEY` | required for `/api/voice/speak` and `/api/voice/transcribe`; 503 without it |
+| `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR`, `ELEVENLABS_VOICE_ID` | per-speaker voice overrides the shared voice; if neither is set, speech uses the first available premade voice returned by ElevenLabs, or 503 if none is available |
+| `ELEVENLABS_MODEL` | speech model, default `eleven_v4`; add to `.env` to override |
 | `NICRRON_CONCURRENCY` | max Nicrron calls in flight, default 4; 429s are retried with backoff |
 | `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | key and project enable PRISM tracing and member-specific KB retrieval; host defaults to `https://prism.blockconvey.com` |
 | `COUNCIL_VERSION` | `v1` disables KB retrieval; default `v2`. Local only, not forwarded by the Worker |

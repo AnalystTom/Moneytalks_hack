@@ -105,6 +105,29 @@ describe("cartoon boardroom", () => {
     ]);
   });
 
+  it("offers speech only for returned text and uses the chair voice for the ruling", () => {
+    const readAloud = vi.fn(() => null);
+    Boardroom({
+      statuses: {},
+      sources: {},
+      onSelect: () => {},
+      readAloud,
+      verdicts: { burry: verdict("burry", "SELL", "Returned Burry answer") },
+      chair: {
+        summary: "Returned chair answer",
+        consensus: "",
+        dissent: [],
+        actions: [],
+        suggestions: [],
+        positions: [],
+      },
+    });
+    expect(readAloud.mock.calls).toEqual([
+      ["scene-burry", "burry", "Returned Burry answer"],
+      ["scene-buffett", "chair", "Returned chair answer"],
+    ]);
+  });
+
   it("renders returned status, valid source counts, and Warren’s final summary", () => {
     const html = renderToStaticMarkup(
       <Boardroom

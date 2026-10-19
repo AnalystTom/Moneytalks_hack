@@ -21,6 +21,9 @@ import type {
   Verdict,
 } from "./contract";
 import VoiceInput from "./VoiceInput";
+import { SpeechPlayback } from "./speech";
+import type { PlaybackState } from "./speech";
+import ReadAloud from "./ReadAloud";
 const Boardroom = lazy(() => import("./Boardroom"));
 const pause = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -194,8 +197,6 @@ export default function App() {
   const [loadingContext, setLoadingContext] = useState(true);
   const [question, setQuestion] = useState("");
   const [roast, setRoast] = useState(false);
-  const [sound, setSound] = useState(true);
-  const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [animation, setAnimation] = useState<AnimationState>({});
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("Your seat is waiting.");
@@ -223,24 +224,14 @@ export default function App() {
   >([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [audioMessage, setAudioMessage] = useState("");
-  const [audioUrl, setAudioUrl] = useState("");
+  const [playback, setPlayback] = useState<PlaybackState>();
+  const speech = useRef<SpeechPlayback | null>(null);
   const controller = useRef<AbortController | null>(null);
   const contextController = useRef<AbortController | null>(null);
   const persona = useRef("");
   const acceptedPortfolio = useRef<
     { file: File; label: string; snapshot?: unknown } | undefined
   >(undefined);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const audioMember = useRef<Member | undefined>(undefined);
-  // Spoken answers play one after another off to the side, so the stream (and the composer) never waits on them.
-  const speech = useRef({
-    abort: new AbortController(),
-    tail: Promise.resolve(),
-    pending: 0,
-  });
-  const soundEnabled = useRef(sound);
-  const voiceEnabled = useRef(false);
-  const audioContext = useRef<AudioContext | null>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
 
@@ -250,16 +241,11 @@ export default function App() {
     void loadContext(abort.signal);
     return () => abort.abort();
   }, []);
-  useEffect(() => {
-    soundEnabled.current = sound;
-    if (!sound) audio.current?.pause();
-  }, [sound]);
   useEffect(
     () => () => {
       controller.current?.abort();
       contextController.current?.abort();
       stopSpeech();
-      void audioContext.current?.close();
     },
     [],
   );
@@ -334,7 +320,6 @@ export default function App() {
         setSources({});
         setSelected(undefined);
         setStage("Your seat is waiting.");
-        setAudioUrl("");
         stopSpeech();
       }
       return brief.brief_id;
@@ -349,167 +334,21 @@ export default function App() {
       if (!signal.aborted) setLoadingContext(false);
     }
   }
-  async function checkVoice(signal: AbortSignal) {
-    voiceEnabled.current = false;
-    setVoiceAvailable(false);
-    try {
-      const response = await fetch("/api/health", { signal });
-      if (response.ok) {
-        const health = await response.json();
-        voiceEnabled.current = health.voice === true;
-        setVoiceAvailable(voiceEnabled.current);
-      }
-    } catch {
-      // Text answers stay available when the capability check fails.
-    }
-  }
-  function unlockSound() {
-    if (!sound) return;
-    try {
-      audioContext.current ??= new AudioContext();
-      void audioContext.current.resume().catch(() => {});
-    } catch {
-      /* Speech remains available through the audio player. */
-    }
-  }
-  async function drumRoll() {
-    setDrumming(true);
-    setActive("buffett");
-    setStage("The council has spoken. Warren has the floor.");
-    const context = audioContext.current;
-    if (soundEnabled.current && context?.state === "running") {
-      for (let i = 0; i < 23; i++) {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        oscillator.type = "triangle";
-        oscillator.frequency.value = 95 + i * 3;
-        const time = context.currentTime + i * 0.065;
-        gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.exponentialRampToValueAtTime(0.12, time + 0.004);
-        gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.055);
-        oscillator.connect(gain);
-        gain.connect(context.destination);
-        oscillator.start(time);
-        oscillator.stop(time + 0.06);
-      }
-    }
-    await pause(1700);
-    setDrumming(false);
-  }
-  async function playAudio(url: string, signal: AbortSignal, member: Member) {
-    if (!voiceEnabled.current || !soundEnabled.current || signal.aborted)
-      return;
-    // Only same-origin backend speech is allowed; never load an arbitrary tracking URL.
-    const parsed = new URL(url, window.location.origin);
-    if (
-      parsed.origin !== window.location.origin ||
-      !parsed.pathname.startsWith("/api/voice/")
-    ) {
-      setAudioMessage("The server returned an unsupported audio URL.");
-      return;
-    }
-    audioMember.current = member;
-    setAudioUrl(parsed.href);
-    const player = audio.current;
-    if (!player || signal.aborted) return;
-    player.src = parsed.href;
-    if (!soundEnabled.current) return;
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        player.onended = null;
-        player.onerror = null;
-        player.onpause = null;
-        player.onplaying = null;
-        player.ontimeupdate = null;
-        signal.removeEventListener("abort", finish);
-        player.pause();
-        setAnimation((previous) =>
-          animateEvent(previous, { event: "audio.stopped", data: { member } }),
-        );
-        resolve();
-      };
-      const stalled = () => {
-        if (settled) return;
-        setAudioMessage(
-          "Voice playback timed out. All answers remain in the transcript.",
-        );
-        finish();
-      };
-      let position = player.currentTime;
-      let timeout = setTimeout(stalled, 30000);
-      signal.addEventListener("abort", finish, { once: true });
-      player.onended = finish;
-      player.onpause = () => {
-        if (!player.ended) finish();
-      };
-      player.onplaying = () => {
-        if (!settled) {
-          setAudioMessage("");
-          setAnimation((previous) =>
-            animateEvent(previous, {
-              event: "audio.playing",
-              data: { member },
-            }),
-          );
-        }
-      };
-      player.ontimeupdate = () => {
-        if (settled || player.currentTime === position) return;
-        position = player.currentTime;
-        clearTimeout(timeout);
-        timeout = setTimeout(stalled, 30000);
-      };
-      player.onerror = () => {
-        if (settled) return;
-        voiceEnabled.current = false;
-        setVoiceAvailable(false);
-        setAudioUrl("");
-        setAudioMessage(
-          "Voice unavailable from the server. All answers remain in the transcript.",
-        );
-        finish();
-      };
-      void player.play().catch(() => {
-        if (settled) return;
-        setAudioMessage(
-          "Voice could not play automatically. Use the audio controls to retry.",
-        );
-        finish();
-      });
-    });
-  }
   function stopSpeech() {
-    if (speech.current.pending) audio.current?.pause();
-    speech.current.abort.abort();
-    speech.current = {
-      abort: new AbortController(),
-      tail: Promise.resolve(),
-      pending: 0,
-    };
+    speech.current?.stop();
   }
-  function speak(member: Member, url: string) {
-    const queue = speech.current;
-    queue.pending++;
-    queue.tail = queue.tail
-      .then(async () => {
-        const { signal } = queue.abort;
-        if (signal.aborted) return;
-        if (voiceEnabled.current && soundEnabled.current) {
-          await playAudio(url, signal, member);
-        } else {
-          setAnimation((previous) => ({ ...previous, [member]: "speaking" }));
-          await pause(1200);
-          setAnimation((previous) => ({ ...previous, [member]: "idle" }));
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        queue.pending--;
-      });
+  function readAloud(id: string, member: Speaker, text: string) {
+    return (
+      <ReadAloud
+        id={id}
+        member={member}
+        playback={playback}
+        onClick={() => {
+          speech.current ??= new SpeechPlayback(setPlayback, setAudioMessage);
+          void speech.current.toggle(id, member, text);
+        }}
+      />
+    );
   }
   async function receive(event: CouncilEvent, signal: AbortSignal) {
     if (signal.aborted) return;
@@ -562,7 +401,11 @@ export default function App() {
         );
         break;
       case "chair.summary":
-        await drumRoll();
+        setDrumming(true);
+        setActive("buffett");
+        setStage("The council has spoken. Warren has the floor.");
+        await pause(1700);
+        setDrumming(false);
         if (!signal.aborted) {
           setChair(event.data);
           setMessages((previous) => [
@@ -597,8 +440,7 @@ export default function App() {
         setSuggestions(event.data.suggestions);
         break;
       case "member.audio":
-        if (event.data.member !== "chair")
-          speak(event.data.member, event.data.audio_url);
+        // Speech is requested only by an explicit click on an answer.
         break;
       case "run.done":
         setRunFinished(true);
@@ -633,10 +475,7 @@ export default function App() {
     if (!follow) setRunFinished(false);
     setMessages((previous) => [...previous, { kind: "user", text: message }]);
     setQuestion("");
-    unlockSound();
     try {
-      setAudioUrl("");
-      await checkVoice(abort.signal);
       abort.signal.throwIfAborted();
       const lost = (cause: unknown, detail: string) =>
         !abort.signal.aborted &&
@@ -720,7 +559,7 @@ export default function App() {
       setBusy(false);
       setDrumming(false);
       setActive(undefined);
-      if (!speech.current.pending) setAnimation({});
+      setAnimation({});
     }
   }
   function submit(event: FormEvent) {
@@ -750,13 +589,6 @@ export default function App() {
             <span className="switch" />
             Roast mode
           </label>
-          <button
-            className="sound-button"
-            onClick={() => setSound(!sound)}
-            aria-pressed={sound}
-          >
-            {sound ? "♪ Sound on" : "♪ Sound off"}
-          </button>
         </div>
       </header>
       <main className="layout">
@@ -791,6 +623,7 @@ export default function App() {
                 sources={sources}
                 chair={chair}
                 onSelect={setSelected}
+                readAloud={readAloud}
               />
             </Suspense>
           </div>
@@ -906,6 +739,7 @@ export default function App() {
                         : members[message.member].name}
                     </small>
                     <p>{message.text}</p>
+                    {readAloud(`chat-${index}`, message.member, message.text)}
                   </div>
                 </article>
               ) : (
@@ -920,6 +754,15 @@ export default function App() {
                       <ChairRuling chair={message.chair} />
                     ) : (
                       <VerdictCard verdict={message.verdict} />
+                    )}
+                    {readAloud(
+                      `chat-${index}`,
+                      message.kind === "chair"
+                        ? "chair"
+                        : message.verdict.member,
+                      message.kind === "chair"
+                        ? message.chair.summary
+                        : message.verdict.analysis || message.verdict.headline,
                     )}
                     <button
                       className="reply-button"
@@ -969,34 +812,6 @@ export default function App() {
                 {audioMessage}
               </p>
             )}
-            <audio
-              ref={audio}
-              controls={voiceAvailable && !!audioUrl}
-              onPlaying={() => {
-                if (audioMember.current)
-                  setAnimation((previous) => ({
-                    ...previous,
-                    [audioMember.current!]: "speaking",
-                  }));
-              }}
-              onEnded={() => {
-                if (audioMember.current)
-                  setAnimation((previous) => ({
-                    ...previous,
-                    [audioMember.current!]: "idle",
-                  }));
-              }}
-              onPause={() => {
-                if (audioMember.current)
-                  setAnimation((previous) => ({
-                    ...previous,
-                    [audioMember.current!]: "idle",
-                  }));
-              }}
-              className={audioUrl ? "audio-player" : "hidden"}
-              aria-label="Council voice playback"
-            />
-
             {replyTo && (
               <button
                 className="reply-target"

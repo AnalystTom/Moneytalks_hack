@@ -24,7 +24,7 @@ Answer caching and replay are not implemented; see [storage limits](../server/RE
 
 - Left ~70%: HTML/CSS boardroom with a curved table and separate generated cartoon portrait cutouts. The active member's bubble is highlighted. BUY and SELL use thumbs-up/down icons, HOLD uses a pause icon, and pending members show an hourglass. Bubble previews and detail selection follow the [web journey](../web/README.md#journey). No WebGL is required.
 - Right ~30%: React chat panel - the input step, ingest summary, chair summary, follow-ups.
-- Narrow screens: two columns of members, with Warren first, and the chat panel below the boardroom. The main content scrolls vertically for long answers while the parody notice remains visible in the footer.
+- Narrow screens: responsive layout and scrolling follow the [web journey](../web/README.md#journey).
 - Design direction: stone-grey / charcoal neutral palette and flat cut-paper cartoon members.
 
 ## Server-to-scene contract
@@ -46,7 +46,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 - Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
 - LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
 - Research: per-member PRISM Knowledge Base retrieval; live web search is not connected.
-- Voice: ElevenLabs text-to-speech, one cloned voice per member (`ELEVENLABS_VOICE_<MEMBER>`).
+- Voice: ElevenLabs text-to-speech; see [server environment settings](../server/README.md#env-names) for voice selection.
 - Bank data: Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0).
 - Market data: TBD (current prices for holdings).
 - Financial-analysis skills: built by KJ; members call them through one shared tool interface (stubbed until KJ's piece lands).
