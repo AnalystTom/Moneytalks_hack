@@ -102,6 +102,7 @@ for (const [width, height] of [
       });
     });
     await page.goto("/");
+    await page.getByRole("button", { name: "Use the demo", exact: true }).click();
     const input = page.getByRole("textbox", { name: "Message the council" });
     const send = page.getByRole("button", {
       name: "Send message",
