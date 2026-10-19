@@ -1,0 +1,97 @@
+[
+  {
+    "check": "desktop-1440x900: details box opens at page start",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "desktop-1440x900: Submit and Use the demo shown",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "desktop-1440x900: no Cancel at first open",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "desktop-1440x900: custom profile card",
+    "pass": true,
+    "detail": "Sam, 31 \u2014 context loaded | 2 holdings \u2014 total valuation unavailable | VOO: share count not given, $8,000.00 reported amount, cost basis not given | AAPL: 40 shares, $150 cost basis per share | Profit/loss unavailable: current prices or cost basis not provided | Cash: $12,000 | Goal: house deposit in 5 years | Not given: cost basis for VOO, share count for VOO"
+  },
+  {
+    "check": "desktop-1440x900: council answer uses submitted holdings",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "desktop-1440x900: reopen keeps text",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "desktop-1440x900: cancel keeps custom context",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "desktop-1440x900: Use the demo loads Jordan",
+    "pass": true,
+    "detail": "Jordan, 38 \u2014 context loaded | $302,171 across 14 holdings | Top positions: PLTR 18%, SPY 16%, NVDA 8% | Cash: $18,431 | Goal: Multiply the money and invest it wisely."
+  },
+  {
+    "check": "desktop-1440x900: demo from first open",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: details box opens at page start",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: Submit and Use the demo shown",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: no Cancel at first open",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: custom profile card",
+    "pass": true,
+    "detail": "Sam, 31 \u2014 context loaded | 2 holdings \u2014 total valuation unavailable | VOO: share count not given, $8,000.00 reported amount, cost basis not given | AAPL: 40 shares, $150 cost basis per share | Profit/loss unavailable: current prices or cost basis not provided | Cash: $12,000 | Goal: house deposit in 5 years | Not given: cost basis for VOO, share count for VOO"
+  },
+  {
+    "check": "mobile-390x844: council answer uses submitted holdings",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: reopen keeps text",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: cancel keeps custom context",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: Use the demo loads Jordan",
+    "pass": true,
+    "detail": "Jordan, 38 \u2014 context loaded | $302,171 across 14 holdings | Top positions: PLTR 18%, SPY 16%, NVDA 8% | Cash: $18,431 | Goal: Multiply the money and invest it wisely."
+  },
+  {
+    "check": "mobile-390x844: demo from first open",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "mobile-390x844: no horizontal page overflow",
+    "pass": true,
+    "detail": ""
+  }
+]
