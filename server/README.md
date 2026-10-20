@@ -1,7 +1,7 @@
 # server - FastAPI backend (see [spec](../data/spec.md))
 
 Implements the council described in [council/README.md](council/README.md): a neutral coordinator plus five
-specialists (Buffett, Dalio, Burry, Leopold, Cramer), then a routed text chat. With no `NICRRON_API_KEY` it streams deterministic canned
+specialists (Buffett, Dalio, Burry, Leopold, Cramer), then a routed text chat. With no `OPENAI_API_KEY` it streams deterministic canned
 events, so the frontend can build against it with no keys. Plaid and market data are stubs behind
 `app/services/`; specialist research uses PRISM Knowledge Base retrieval, not the unused Anchor stub.
 Tracing and retrieval no-op without both `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
@@ -34,7 +34,7 @@ npx wrangler login          # once
 ```
 
 `set-secrets.sh` parses dotenv assignments, including `export`, quotes, inline comments and variable interpolation.
-It rejects malformed assignments before uploading and selects nonempty values with `NICRRON_`, `PRISMTRACE_`,
+It rejects malformed assignments before uploading and selects nonempty values with `OPENAI_`, `PRISMTRACE_`,
 `ELEVENLABS_`, `ANCHOR_`, `PLAID_` or `CORS_` prefixes. Omitted or empty values do not delete existing secrets.
 
 Public URL: https://council.thomasmann2001.workers.dev. `deploy.sh` is the redeploy; secrets persist across deploys.
@@ -51,14 +51,16 @@ on first use, so there is no schema or seed script. From `server/`, run SQL agai
 ## Env names
 
 Copy `../.env.example` to `../.env`; the server loads it on startup (shell variables win). All optional.
+Legacy `NICRRON_*` settings are no longer read; configure the `OPENAI_*` settings below and
+use [Deploy (Cloudflare)](#deploy-cloudflare) to upload them for the Worker.
 
 | name | effect |
 |---|---|
-| `NICRRON_API_KEY`, `NICRRON_MODEL` | set the key for live LLM answers (`https://api.nicrron.ai/v1`); no key = canned events. An unset model or `nicrron/auto` selects `anthropic/claude-opus-5-5`; other model names are used as given |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | set the key for live LLM answers (`https://api.openai.com/v1`); no key = canned events. An unset or blank model selects `gpt-6-luna`; other model names are used as given |
 | `ELEVENLABS_API_KEY` | required for `/api/voice/speak` and `/api/voice/transcribe`; 503 without it |
 | `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR`, `ELEVENLABS_VOICE_ID` | per-speaker voice overrides the shared voice; if neither is set, speech uses the first available premade voice returned by ElevenLabs, or 503 if none is available |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_v4`; add to `.env` to override |
-| `NICRRON_CONCURRENCY` | max Nicrron calls in flight, default 4; 429s are retried with backoff |
+| `OPENAI_CONCURRENCY` | max OpenAI calls in flight, default 4; 429s are retried with backoff |
 | `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID`, `PRISMTRACE_HOST` | key and project enable PRISM tracing and member-specific KB retrieval; host defaults to `https://prism.blockconvey.com` |
 | `COUNCIL_VERSION` | `v1` disables KB retrieval; default `v2`. Local only, not forwarded by the Worker |
 | `CORS_ORIGINS` | comma-separated, default `*` |
@@ -114,7 +116,7 @@ in the [web journey](../web/README.md#journey).
 
 ### Personal details
 
-`POST /api/ingest/text` accepts one JSON `text` string (1–4,000 characters). It needs `NICRRON_API_KEY`
+`POST /api/ingest/text` accepts one JSON `text` string (1–4,000 characters). It needs `OPENAI_API_KEY`
 to extract a profile and at least one holding with a ticker and a share count or dollar amount.
 Request validation or rejected extraction returns 422; an unconfigured model returns 503;
 model HTTP failures return 502. Extraction schemas and validation live in
@@ -134,7 +136,7 @@ remain unknown and are called out on the card. Valuation and profit/loss are mar
 their inputs are absent. Missing cash stays unknown; explicit zero cash is retained. Cash-dependent
 totals and ratios require known cash and holdings value; brokerage/net-worth ratios also require nonzero net worth.
 
-The submitted text goes to Nicrron; the resulting brief is stored as described under [D1 database](#d1-database).
+The submitted text goes to OpenAI; the resulting brief is stored as described under [D1 database](#d1-database).
 The ingest call's PRISM metadata policy is documented in [PRISM proofs](../docs/prism.md).
 
 ## Known limits

@@ -44,7 +44,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 
 - Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 holding briefs and runs (cached events are still planned). See [deployment](../server/README.md#deploy-cloudflare) for current storage. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
 - Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
-- LLM: Nicrron API (OpenAI-compatible, `https://api.nicrron.ai/v1`).
+- LLM: OpenAI API; see [server environment settings](../server/README.md#env-names) for the model and credentials.
 - Research: per-member PRISM Knowledge Base retrieval; live web search is not connected.
 - Voice: ElevenLabs text-to-speech; see [server environment settings](../server/README.md#env-names) for voice selection.
 - Bank data: Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0).
@@ -63,7 +63,7 @@ For supported settings, see [Env names](../server/README.md#env-names); for Work
 - `server/` - FastAPI backend.
 - `web/` - React frontend.
 
-The earlier TypeScript starter (working Nicrron call + PRISM trace and span ingest) is in commit `d8f4499`; use it as the reference for endpoints and payloads.
+The earlier TypeScript starter (working LLM call + PRISM trace and span ingest) is in commit `d8f4499`; use it as the reference for endpoints and payloads.
 
 ## PRISM proofs (required for judging)
 

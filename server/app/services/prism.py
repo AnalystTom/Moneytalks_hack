@@ -49,7 +49,7 @@ async def trace(
     body = {
         "trace_id": trace_id, "project_id": project, "session_id": session_id, "agent_id": agent_id,
         "agent_name": f"{agent_id.removeprefix('council.').title()} {council_version()} ({'KB off' if council_version() == 'v1' else 'KB + grounding rule'})" if span_type == "agent" else agent_id,
-        "model": model or env("NICRRON_MODEL", "nicrron/auto"), "input_messages": [{"role": "user", "content": input_text}],
+        "model": model or env("OPENAI_MODEL", "gpt-6-luna"), "input_messages": [{"role": "user", "content": input_text}],
         "output_message": output_text, "latency_ms": 0, "metadata": {"status": status, "council_version": council_version()},
     }
     spans = [

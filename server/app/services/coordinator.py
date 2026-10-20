@@ -1,7 +1,7 @@
 """The neutral coordinator's deterministic rules: plan, verify, rule, route (see council/orchestrator.md).
 
 Each function is the no-LLM path and also the guard rail applied to LLM output, so the council
-behaves the same shape with or without NICRRON_API_KEY.
+behaves the same shape with or without OPENAI_API_KEY.
 """
 import json
 import re

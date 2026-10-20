@@ -15,7 +15,7 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     stream.seek(0)
     secrets = {
         key: value for key, value in dotenv_values(stream=stream).items()
-        if value and key.startswith(("NICRRON_", "PRISMTRACE_", "ELEVENLABS_", "ANCHOR_", "PLAID_", "CORS_"))
+        if value and key.startswith(("OPENAI_", "PRISMTRACE_", "ELEVENLABS_", "ANCHOR_", "PLAID_", "CORS_"))
     }
 print(json.dumps(secrets))
 PY
