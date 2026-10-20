@@ -147,7 +147,7 @@ def test_ask_is_chat_with_one_member(client, jordan_brief_id):
 def mock_llm(monkeypatch, handler):
     from app.services import llm
 
-    monkeypatch.setenv("NICRRON_API_KEY", "test")
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
     real = httpx.AsyncClient
 
     def respond(request):
@@ -175,7 +175,7 @@ def council_llm(messages, analysis=ANALYSIS, advice=ADVICE):
     return analysis if "Stage 1" in system else advice
 
 
-def test_run_with_nicrron_mocked(client, jordan_brief_id, monkeypatch, kb_results):
+def test_run_with_openai_mocked(client, jordan_brief_id, monkeypatch, kb_results):
     mock_llm(monkeypatch, council_llm)
     _, events = run_council(client, jordan_brief_id)
     assert names(events)[-1] == "run.done"
@@ -269,7 +269,7 @@ def test_bad_llm_output_falls_back_to_canned(client, jordan_brief_id, monkeypatc
     assert len(verdicts) == len(MEMBERS) and all(v["positions"] for v in verdicts)
 
 
-def test_chat_with_nicrron_mocked(client, jordan_brief_id, monkeypatch):
+def test_chat_with_openai_mocked(client, jordan_brief_id, monkeypatch):
     run_id, _ = run_council(client, jordan_brief_id)
     seen = []
 
@@ -301,7 +301,7 @@ def test_llm_retries_rate_limits(monkeypatch):
 
     from app.services import llm
 
-    monkeypatch.setenv("NICRRON_API_KEY", "test")
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
     waits, real_sleep = [], asyncio.sleep
     monkeypatch.setattr(llm.asyncio, "sleep", lambda s: waits.append(s) or real_sleep(0))
     replies = iter([httpx.Response(429), httpx.Response(503, headers={"retry-after": "1"}),
@@ -326,7 +326,7 @@ def test_chat_survives_prose_and_failed_replies(client, jordan_brief_id, monkeyp
 
     from app.services import llm
 
-    monkeypatch.setenv("NICRRON_API_KEY", "test")
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
     real = httpx.AsyncClient
     monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(respond), **kw))
     events = chat(client, run_id, "AMD is split: Leopold says hold, Jim says sell. Settle it.")

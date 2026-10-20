@@ -32,7 +32,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
     monkeypatch.setitem(sys.modules, "asgi", asgi)
     worker = SimpleNamespace(**runpy.run_path(str(ROOT / "server" / "worker.py")))
     bindings = {
-        "NICRRON_API_KEY": "llm-key",
+        "OPENAI_API_KEY": "llm-key",
         "PRISMTRACE_API_KEY": "trace-key",
         "ELEVENLABS_API_KEY": "voice-key",
         "ELEVENLABS_MODEL": "custom-model",
@@ -49,7 +49,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
 
     response = await request("GET", "/api/health")
     assert response.status_code == 200
-    assert response.json()["llm"] == "nicrron"
+    assert response.json()["llm"] == "openai"
     assert response.json()["voice"] is True
     assert response.json()["prism"] is True
     for candidate in ("https://council.example", "https://other.example"):
@@ -113,12 +113,12 @@ def uploader(tmp_path):
 def test_secret_upload_preserves_dotenv_values(uploader):
     result, upload = uploader('''
 # dotenv input
-export NICRRON_API_KEY=abc
-NICRRON_MODEL=nicrron/auto # routing
+export OPENAI_API_KEY=abc
+OPENAI_MODEL=gpt-6-luna # routing
 PRISMTRACE_PROJECT_ID='project # one' # comment
 PRISMTRACE_HOST="https://example.test/#fragment"
 ELEVENLABS_MODEL="custom\\nmodel"
-ELEVENLABS_VOICE_BURRY="${NICRRON_API_KEY}-voice"
+ELEVENLABS_VOICE_BURRY="${OPENAI_API_KEY}-voice"
 CORS_ORIGINS = "https://one.example,https://two.example"
 PLAID_CLIENT_ID="line one
 line two"
@@ -128,8 +128,8 @@ UNRELATED_KEY=ignored
 ''')
     assert result.returncode == 0, result.stderr
     assert json.loads(upload.read_text()) == {
-        "NICRRON_API_KEY": "abc",
-        "NICRRON_MODEL": "nicrron/auto",
+        "OPENAI_API_KEY": "abc",
+        "OPENAI_MODEL": "gpt-6-luna",
         "PRISMTRACE_PROJECT_ID": "project # one",
         "PRISMTRACE_HOST": "https://example.test/#fragment",
         "ELEVENLABS_MODEL": "custom\nmodel",
@@ -141,7 +141,7 @@ UNRELATED_KEY=ignored
     assert not result.stdout
 
 
-@pytest.mark.parametrize("contents", [None, 'NICRRON_API_KEY=abc\nELEVENLABS_MODEL="unterminated'])
+@pytest.mark.parametrize("contents", [None, 'OPENAI_API_KEY=abc\nELEVENLABS_MODEL="unterminated'])
 def test_invalid_secret_file_never_uploads(uploader, contents):
     result, upload = uploader(contents)
     assert result.returncode != 0
@@ -149,13 +149,13 @@ def test_invalid_secret_file_never_uploads(uploader, contents):
     assert "abc" not in result.stdout + result.stderr
 
 
-def test_nicrron_model_defaults_to_opus(monkeypatch):
+def test_model_defaults_to_gpt_6_luna(monkeypatch):
     from app.services import llm
 
-    for value in (None, "", "nicrron/auto"):
-        monkeypatch.delenv("NICRRON_MODEL", raising=False)
+    for value in (None, ""):
+        monkeypatch.delenv("OPENAI_MODEL", raising=False)
         if value is not None:
-            monkeypatch.setenv("NICRRON_MODEL", value)
-        assert llm.model() == "anthropic/claude-opus-5-5"
-    monkeypatch.setenv("NICRRON_MODEL", "other/model")
+            monkeypatch.setenv("OPENAI_MODEL", value)
+        assert llm.model() == "gpt-6-luna"
+    monkeypatch.setenv("OPENAI_MODEL", "other/model")
     assert llm.model() == "other/model"

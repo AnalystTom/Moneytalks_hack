@@ -9,7 +9,7 @@ router = APIRouter()
 async def health() -> dict:
     return {
         "ok": True,
-        "llm": "nicrron" if env("NICRRON_API_KEY") else "canned",
+        "llm": "openai" if env("OPENAI_API_KEY") else "canned",
         "voice": bool(env("ELEVENLABS_API_KEY")),
         "prism": bool(env("PRISMTRACE_API_KEY")),
     }

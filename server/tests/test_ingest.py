@@ -55,9 +55,9 @@ def _profile(**over):
 
 @pytest.fixture
 def model(monkeypatch):
-    """Stand in for the Nicrron call: returns whatever the test puts in `reply`."""
+    """Stand in for the OpenAI call: returns whatever the test puts in `reply`."""
     reply = {}
-    monkeypatch.setenv("NICRRON_API_KEY", "k")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
 
     async def fake(system, user, response_format=None):
         assert response_format["json_schema"]["strict"] is True
@@ -135,7 +135,7 @@ def test_ingest_text_unreadable_model_reply_is_a_clear_422(client, model):
 
 def test_ingest_text_needs_model_and_nonempty_text(client, monkeypatch):
     assert client.post("/api/ingest/text", json={"text": SAM}).status_code == 503
-    monkeypatch.setenv("NICRRON_API_KEY", "k")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
     assert client.post("/api/ingest/text", json={"text": ""}).status_code == 422
     assert client.post("/api/ingest/text", json={"text": "x" * 4001}).status_code == 422
 
@@ -143,7 +143,7 @@ def test_ingest_text_needs_model_and_nonempty_text(client, monkeypatch):
 def test_ingest_text_brief_drives_council(client, model, monkeypatch):
     model["value"] = _profile()
     brief_id = client.post("/api/ingest/text", json={"text": SAM}).json()["brief_id"]
-    monkeypatch.delenv("NICRRON_API_KEY")
+    monkeypatch.delenv("OPENAI_API_KEY")
     events = run_council(client, brief_id)[1]
     assert events[-1][0] == "run.done"
     assert "run.error" not in [event for event, _ in events]
@@ -250,7 +250,7 @@ def test_ingest_text_consolidates_lots_without_losing_unknowns(client, model, mo
     assert position["lots"] == [{**lot, "ticker": lot["ticker"].upper()} for lot in lots]
     if basis is not None:
         assert position["cost"] == 5000
-    monkeypatch.delenv("NICRRON_API_KEY")
+    monkeypatch.delenv("OPENAI_API_KEY")
     events = run_council(client, response.json()["brief_id"])[1]
     assert events[-1][0] == "run.done"
     ruling = next(data for event, data in events if event == "chair.summary")
@@ -350,7 +350,7 @@ def test_missing_performance_fallback_covers_verdict_speech_and_chat(client, mod
     monkeypatch.setattr(llm, "complete_json", complete)
     monkeypatch.setattr(llm, "complete_reply", failed_reply)
     if failure == "disabled":
-        monkeypatch.delenv("NICRRON_API_KEY")
+        monkeypatch.delenv("OPENAI_API_KEY")
     run_id, events = run_council(client, response.json()["brief_id"], roast=roast)
     assert events[-1][0] == "run.done"
     assert "run.error" not in [event for event, _ in events]
