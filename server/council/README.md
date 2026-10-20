@@ -13,22 +13,17 @@ Status: **server implemented and adapted to the web boardroom**. See the [web jo
 
 ## What it does
 
-The user brings two things:
+The user chooses personal details or demo context through the [web journey](../../web/README.md#journey).
+Accepted input formats are maintained in the [API documentation](../README.md#endpoints).
 
-- **Persona file** (`data/PERSONA.md`): who they are, net worth, every account, goals.
-- **Portfolio file** (`data/portfolio.json`): the one account they chose to connect, a brokerage
-  account with positions and summary stats. It is part of the total assets in the persona file, not
-  separate from it; the other accounts are self-reported balances.
-
-A **coordinator** merges them into one client brief, writes a tailored assignment for each of five
+A **coordinator** turns the accepted input into one client brief, writes a tailored assignment for each of five
 **specialists**, and runs them in parallel. Each specialist queries its PRISM Knowledge Base through its own lens,
 then returns a short analysis, a verdict with a conviction level, and concrete advice. The coordinator
 checks the answers against their sources, delivers a ruling, and then runs the conversation.
 
 ```
- PERSONA.md ─┐
-             ├─> [1 Ingest] ─> client brief ─> [2 Plan] ─> 5 assignments
- portfolio ──┘                                               │
+ details or files ─> [1 Ingest] ─> client brief ─> [2 Plan] ─> 5 assignments
+                                                             │
                      ┌──────────┬──────────┬─────────┬───────┴──┐
                      v          v          v         v          v
                   Buffett     Dalio      Burry    Leopold     Cramer      [3 Research + analyse, parallel]
@@ -56,14 +51,12 @@ checks the answers against their sources, delivers a ruling, and then runs the c
 
 ### 1. Ingest -> client brief
 
-Merge both files into one structured brief that every agent receives verbatim:
-
-- Profile: name, age, location, horizon (inferred from age and goals if missing), goals, implied risk tolerance.
-- Balance sheet: every account from PERSONA.md, with the connected brokerage account as one line of it.
-- Connected brokerage detail: equity, cash, positions with weight, P/L, sector, beta, role (from portfolio.json).
-- Pre-computed facts, so agents never do arithmetic: top-5 weights, sector mix, portfolio beta, yield,
-  winners/losers, biggest drag, brokerage as % of net worth, total cash as % of net worth.
-- Data quality note: the checked-in brokerage snapshot is demo data; other balances are self-reported.
+Build one structured brief that every agent receives verbatim: the supplied persona, holdings, account
+data and pre-computed portfolio facts. Fact calculations are owned by
+[`ingest.facts`](../app/services/ingest.py); personal-detail extraction and missing-data handling are
+documented under [Personal details](../README.md#personal-details). The checked-in brokerage snapshot
+is demo data; personal details are self-reported. The brokerage represents one account within the
+persona's total assets, not an additional balance to add to that total.
 
 ### 2. Plan (coordinator)
 
@@ -96,6 +89,13 @@ whole portfolio**; calls are only ever on individual held names, and only after 
 
 Specialists do not see each other's work during the opening run, so their first calls are
 independent. Cross-talk starts in chat.
+
+When analysis or advice falls back and any position lacks weight or profit/loss, fallback headlines,
+analysis and advice state that valuation or performance data is unavailable. Fallback calls are included
+only for positions with both known weight and profit/loss. If none qualify, no synthetic votes enter the
+chair ruling; its consensus, spoken summary and fallback chat retain the unavailable message.
+Fallback member speech and chat also retain that message. See the regression coverage in
+[`test_ingest.py`](../tests/test_ingest.py).
 
 ### 4. Verify (coordinator)
 

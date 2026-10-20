@@ -161,6 +161,39 @@ export async function ingestPortfolio(file: File): Promise<File> {
   return file;
 }
 
+// Free text about the user -> a brief built by the server from only what they wrote.
+export async function ingestText(
+  text: string,
+  signal: AbortSignal,
+): Promise<{ briefId: string; card: ContextCard }> {
+  const response = await fetch("/api/ingest/text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    signal,
+  }).catch((cause) => {
+    if (signal.aborted) throw cause;
+    throw new Error("Could not reach the server. Please try again.");
+  });
+  if (!response.ok) throw await apiError(response);
+  const brief = await response.json();
+  if (
+    typeof brief.brief_id !== "string" ||
+    typeof brief.card?.title !== "string" ||
+    !Array.isArray(brief.card.lines)
+  )
+    throw new Error("The server returned an invalid client brief.");
+  return {
+    briefId: brief.brief_id,
+    card: {
+      title: brief.card.title,
+      lines: brief.card.lines.filter(
+        (line: unknown) => typeof line === "string",
+      ),
+    },
+  };
+}
+
 export async function apiError(response: Response): Promise<Error> {
   const body = await response.json().catch(() => null);
   return new Error(

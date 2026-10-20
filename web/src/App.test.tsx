@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import ProfileModal from "./ProfileModal";
 import VoiceInput from "./VoiceInput";
 import ReadAloud from "./ReadAloud";
 import { SpeechPlayback } from "./speech";
@@ -48,6 +49,8 @@ type Props = {
   ref?: { current: unknown };
   disabled?: boolean;
   onClick?: () => void;
+  onDemo?: () => void;
+  onCancel?: () => void;
   onSubmit?: (event: { preventDefault: () => void }) => void;
   onChange?: (event: { target: { value: string; files?: File[] } }) => void;
   onTranscript?: (text: string) => void;
@@ -67,6 +70,11 @@ function get(key: string, value: unknown): Props {
   const props = find(App(), key, value);
   if (!props) throw new Error(`Missing ${key}=${value}`);
   return props;
+}
+function submitDetails(text: string) {
+  (get("type", ProfileModal).onSubmit as unknown as (text: string) => void)(
+    text,
+  );
 }
 function submit(className: string) {
   get("className", className).onSubmit!({ preventDefault() {} });
@@ -131,7 +139,7 @@ beforeEach(async () => {
     await receive({ event: "run.done", data: { run_id: "parent" } });
   });
   get("className", "chat-form");
-  hooks.effects[0]();
+  get("type", ProfileModal).onDemo!();
   await vi.waitFor(() =>
     expect(get("className", "context-chip").children).toBe(
       "Jordan’s portfolio loaded",
@@ -169,6 +177,204 @@ it("auto-ingests the checked-in context and renders only chat with one composer"
     expect.objectContaining({ brief_id: "brief", question: "Should I hold?" }),
     expect.any(AbortSignal),
     expect.any(Function),
+  );
+});
+
+const SAM = "I'm Sam, 31. 40 shares of AAPL at $150, $8k in VOO, $12k cash.";
+const samCard = {
+  title: "Sam, 31 — context loaded",
+  lines: [
+    "2 holdings — total valuation unavailable",
+    "Cash: $12,000",
+    "Not given: goals",
+  ],
+};
+function mockIngestText(response: Response, brief = "sam") {
+  const demo = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, options) =>
+    input === "/api/ingest/text"
+      ? response.ok
+        ? Response.json({ brief_id: brief, summary: "ok", card: samCard })
+        : response
+      : demo(input, options),
+  );
+}
+async function openFresh() {
+  hooks.values = [];
+  hooks.next = 0;
+  hooks.effects = [];
+  vi.mocked(fetch).mockClear();
+}
+
+it("opens on the details box and loads nothing until a choice is made", async () => {
+  await openFresh();
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  expect(html).toContain('aria-label="Your details"');
+  expect(html).toContain("Waiting for your details");
+  expect(fetch).not.toHaveBeenCalledWith("/api/ingest", expect.anything());
+  expect(get("aria-label", "Send message").disabled).toBe(true);
+  expect(get("type", ProfileModal).onCancel).toBeUndefined();
+});
+
+it("submits the user's own details and council runs on that brief", async () => {
+  await openFresh();
+  mockIngestText(Response.json({}));
+  submitDetails(SAM);
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Your details loaded",
+    ),
+  );
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/ingest/text",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ text: SAM }),
+    }),
+  );
+  expect(fetch).not.toHaveBeenCalledWith("/api/ingest", expect.anything());
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  expect(html).not.toContain('aria-label="Your details"'); // modal closed
+  expect(html).toContain("Sam, 31 — context loaded");
+  expect(html).toContain("Not given: goals");
+  expect(html).toContain("Change my details");
+  expect(html).not.toContain("Jordan");
+  expect(html).not.toContain("Replace portfolio");
+  get("id", "message").onChange!({ target: { value: "Should I sell AAPL?" } });
+  submit("chat-form");
+  await idle();
+  expect(streamCouncil).toHaveBeenCalledWith(
+    "/api/council/run",
+    expect.objectContaining({ brief_id: "sam" }),
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+});
+
+it("keeps the box open with the server's message when the details are rejected", async () => {
+  await openFresh();
+  mockIngestText(
+    Response.json(
+      { detail: "The cash (50000) isn't in what you wrote." },
+      { status: 422 },
+    ),
+  );
+  submitDetails(SAM);
+  await vi.waitFor(() =>
+    expect(get("type", ProfileModal).error).toBe(
+      "The cash (50000) isn't in what you wrote.",
+    ),
+  );
+  expect(get("type", ProfileModal).busy).toBe(false);
+  expect(get("className", "context-chip").children).toBe(
+    "Waiting for your details",
+  );
+});
+
+it("lets the user reopen the box, keeps their text, and switch back to the demo", async () => {
+  await openFresh();
+  mockIngestText(Response.json({}));
+  submitDetails(SAM);
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Your details loaded",
+    ),
+  );
+  get("className", "change-details").onClick!();
+  expect(get("type", ProfileModal).initialText).toBe(SAM);
+  expect(get("type", ProfileModal).onCancel).toBeDefined();
+  get("type", ProfileModal).onDemo!();
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Jordan’s portfolio loaded",
+    ),
+  );
+  hooks.next = 0;
+  const html = renderToStaticMarkup(App());
+  expect(html).toContain("Jordan, 38 — context loaded");
+  expect(html).toContain("Replace portfolio");
+});
+
+it.each(["details", "demo", "portfolio"])(
+  "clears old suggestions when switching to %s and retains them on Cancel",
+  async (destination) => {
+    vi.useFakeTimers();
+    const chip = "Should I reduce my old PLTR position?";
+    vi.mocked(streamCouncil).mockImplementationOnce(
+      async (_, __, ___, receive) => {
+        await receive({ event: "run.started", data: { run_id: "parent" } });
+        await receive({
+          event: "chat.closed",
+          data: { text: "", suggestions: [chip] },
+        });
+        await receive({ event: "run.done", data: { run_id: "parent" } });
+      },
+    );
+    submit("chat-form");
+    await vi.advanceTimersByTimeAsync(1200);
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).toContain(chip);
+    get("className", "change-details").onClick!();
+    get("type", ProfileModal).onCancel!();
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).toContain(chip);
+    if (destination === "portfolio") {
+      get("aria-label", "Replace portfolio").onChange!({
+        target: {
+          value: "",
+          files: [
+            new File(["ticker,shares,cost_basis\nMSFT,7,200"], "new.csv"),
+          ],
+        },
+      });
+    } else {
+      get("className", "change-details").onClick!();
+      if (destination === "demo") get("type", ProfileModal).onDemo!();
+      else {
+        mockIngestText(Response.json({}));
+        submitDetails(SAM);
+      }
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get("className", "context-chip").children).toBe(
+      destination === "details"
+        ? "Your details loaded"
+        : destination === "demo"
+          ? "Jordan’s portfolio loaded"
+          : "new.csv loaded",
+    );
+    expect(() => get("className", "chips")).toThrow("Missing");
+    hooks.next = 0;
+    expect(renderToStaticMarkup(App())).not.toContain(chip);
+  },
+);
+
+it("re-ingests the user's text, not the demo, when the server forgets the brief", async () => {
+  await openFresh();
+  mockIngestText(Response.json({}));
+  submitDetails(SAM);
+  await vi.waitFor(() =>
+    expect(get("className", "context-chip").children).toBe(
+      "Your details loaded",
+    ),
+  );
+  get("id", "message").onChange!({ target: { value: "Should I hold?" } });
+  vi.mocked(streamCouncil)
+    .mockRejectedValueOnce(new Error("unknown brief_id"))
+    .mockImplementationOnce(async (_, body, __, receive) => {
+      expect(body).toMatchObject({ brief_id: "sam-2" });
+      await receive({ event: "run.started", data: { run_id: "r" } });
+      await receive({ event: "run.done", data: { run_id: "r" } });
+    });
+  mockIngestText(Response.json({}), "sam-2");
+  submit("chat-form");
+  await idle();
+  await vi.waitFor(() => expect(streamCouncil).toHaveBeenCalledTimes(2));
+  expect(fetch).not.toHaveBeenCalledWith(
+    "/demo-portfolio.json",
+    expect.anything(),
   );
 });
 
@@ -383,7 +589,7 @@ it("shows context failure, disables send, and retries the real loading path", as
     new Response("Unavailable", { status: 503 }),
   );
   get("className", "chat-form");
-  hooks.effects[0]();
+  get("type", ProfileModal).onDemo!();
   await vi.waitFor(() =>
     expect(get("className", "context-chip").children).toBe(
       "Portfolio unavailable",

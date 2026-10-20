@@ -2,6 +2,13 @@
 
 Project `6deadd60-9c2a-4ee7-bd40-608c187fa024` (Meta Workspace) at https://prism.blockconvey.com. The judging results below were captured before the council-v0 integration, when each member turn included `anchor.search`, `kb.search` and `grounding.check` spans. The current backend records separate stage traces via `prism.span`, with session id = council `run_id`; it does not emit those historical tool/retrieval steps. Current research behavior is documented in the [council pipeline](../server/council/README.md#3-each-specialist-in-parallel-analyse---research-names---advise).
 
+Personal-detail extraction uses a separate `council.ingest_text` LLM trace with a fresh session id.
+On success or failure its input is empty and its output contains only model, latency, success status,
+profile field count and position field count. It never includes the submitted text or extracted personal
+values. This policy applies to the ingest trace, not downstream council stage traces. The authoritative
+implementation is [`profile.build`](../server/app/services/profile.py), with regression coverage in
+[`test_ingest.py`](../server/tests/test_ingest.py).
+
 **The demo in one line:** v1 members invent figures the client file never contained (Cramer: "a $500 monthly plan"); v2 retrieves from each member's Knowledge Base and is told to use only provided figures; the same 18 questions (50 runs each) score 10% grounded on v1 and 64% on v2 in the PRISM evaluator (Buffett), and 61.5% vs 92% on the local check across all four members.
 
 ## 1. Knowledge Base

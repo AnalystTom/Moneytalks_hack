@@ -6,6 +6,7 @@ import {
   apiError,
   contextCard,
   ingestPortfolio,
+  ingestText,
   members,
   portfolioFile,
   sourceUrl,
@@ -20,6 +21,7 @@ import type {
   Speaker,
   Verdict,
 } from "./contract";
+import ProfileModal from "./ProfileModal";
 import VoiceInput from "./VoiceInput";
 import { SpeechPlayback } from "./speech";
 import type { PlaybackState } from "./speech";
@@ -194,7 +196,12 @@ function MemberDialog({
 export default function App() {
   const [context, setContext] = useState<{ briefId: string; label: string }>();
   const [contextSummary, setContextSummary] = useState<ContextCard>();
-  const [loadingContext, setLoadingContext] = useState(true);
+  const [loadingContext, setLoadingContext] = useState(false);
+  // The page opens on the details box; nothing loads until the user submits or picks the demo.
+  const [profileOpen, setProfileOpen] = useState(true);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [usingDetails, setUsingDetails] = useState(false);
   const [question, setQuestion] = useState("");
   const [roast, setRoast] = useState(false);
   const [animation, setAnimation] = useState<AnimationState>({});
@@ -229,18 +236,14 @@ export default function App() {
   const controller = useRef<AbortController | null>(null);
   const contextController = useRef<AbortController | null>(null);
   const persona = useRef("");
+  const detailsText = useRef("");
+  const detailsInUse = useRef(false);
   const acceptedPortfolio = useRef<
     { file: File; label: string; snapshot?: unknown } | undefined
   >(undefined);
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
 
-  useEffect(() => {
-    const abort = new AbortController();
-    contextController.current = abort;
-    void loadContext(abort.signal);
-    return () => abort.abort();
-  }, []);
   useEffect(
     () => () => {
       controller.current?.abort();
@@ -261,6 +264,8 @@ export default function App() {
     setLoadingContext(true);
     setError("");
     try {
+      if (detailsInUse.current && !replacement)
+        return await loadDetails(detailsText.current, signal);
       let file = replacement ?? acceptedPortfolio.current?.file;
       let snapshot = acceptedPortfolio.current?.snapshot;
       if (replacement?.name.toLowerCase().endsWith(".json"))
@@ -312,16 +317,7 @@ export default function App() {
       setRunId("");
       setRunFinished(false);
       setReplyTo(undefined);
-      if (replacement) {
-        setMessages([]);
-        setVerdicts({});
-        setChair(undefined);
-        setStatuses({});
-        setSources({});
-        setSelected(undefined);
-        setStage("Your seat is waiting.");
-        stopSpeech();
-      }
+      if (replacement) resetConversation();
       return brief.brief_id;
     } catch (cause) {
       if (!signal.aborted)
@@ -333,6 +329,71 @@ export default function App() {
     } finally {
       if (!signal.aborted) setLoadingContext(false);
     }
+  }
+  function resetConversation() {
+    setMessages([]);
+    setSuggestions([]);
+    setVerdicts({});
+    setChair(undefined);
+    setStatuses({});
+    setSources({});
+    setSelected(undefined);
+    setStage("Your seat is waiting.");
+    stopSpeech();
+  }
+  // Brief from the user's own text; the demo files are dropped so a retry never mixes the two.
+  async function loadDetails(text: string, signal: AbortSignal) {
+    const { briefId, card } = await ingestText(text, signal);
+    signal.throwIfAborted();
+    detailsText.current = text;
+    detailsInUse.current = true;
+    acceptedPortfolio.current = undefined;
+    persona.current = "";
+    setUsingDetails(true);
+    setContextSummary(card);
+    setContext({ briefId, label: "Your details loaded" });
+    setRunId("");
+    setRunFinished(false);
+    setReplyTo(undefined);
+    return briefId;
+  }
+  async function submitDetails(text: string) {
+    contextController.current?.abort();
+    const abort = new AbortController();
+    contextController.current = abort;
+    setProfileBusy(true);
+    setProfileError("");
+    try {
+      await loadDetails(text, abort.signal);
+      resetConversation();
+      setError("");
+      setProfileOpen(false);
+    } catch (cause) {
+      if (!abort.signal.aborted)
+        setProfileError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not read your details. Please try again.",
+        );
+    } finally {
+      if (!abort.signal.aborted) setProfileBusy(false);
+    }
+  }
+  function chooseDemo() {
+    contextController.current?.abort();
+    const abort = new AbortController();
+    contextController.current = abort;
+    detailsInUse.current = false;
+    acceptedPortfolio.current = undefined;
+    persona.current = "";
+    setUsingDetails(false);
+    setProfileError("");
+    setProfileBusy(false);
+    setProfileOpen(false);
+    setContext(undefined);
+    setContextSummary(undefined);
+    resetConversation();
+    void loadContext(abort.signal);
   }
   function stopSpeech() {
     speech.current?.stop();
@@ -652,9 +713,22 @@ export default function App() {
             <span className="context-chip" role="status">
               {loadingContext
                 ? "Loading portfolio…"
-                : context?.label || "Portfolio unavailable"}
+                : context?.label ||
+                  (profileOpen
+                    ? "Waiting for your details"
+                    : "Portfolio unavailable")}
             </span>
-            {!context && !loadingContext && (
+            <button
+              className="change-details"
+              disabled={busy || voiceBusy || loadingContext}
+              onClick={() => {
+                setProfileError("");
+                setProfileOpen(true);
+              }}
+            >
+              Change my details
+            </button>
+            {!context && !loadingContext && !profileOpen && (
               <button
                 className="context-retry"
                 onClick={() => {
@@ -666,25 +740,27 @@ export default function App() {
                 Retry
               </button>
             )}
-            <label className="attach-context" title="Replace portfolio">
-              <span aria-hidden="true">⌁</span>
-              <input
-                type="file"
-                accept=".csv,.json"
-                aria-label="Replace portfolio"
-                disabled={busy || voiceBusy || loadingContext}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    contextController.current?.abort();
-                    const abort = new AbortController();
-                    contextController.current = abort;
-                    void loadContext(abort.signal, file);
-                  }
-                  event.target.value = "";
-                }}
-              />
-            </label>
+            {!usingDetails && (
+              <label className="attach-context" title="Replace portfolio">
+                <span aria-hidden="true">⌁</span>
+                <input
+                  type="file"
+                  accept=".csv,.json"
+                  aria-label="Replace portfolio"
+                  disabled={busy || voiceBusy || loadingContext}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      contextController.current?.abort();
+                      const abort = new AbortController();
+                      contextController.current = abort;
+                      void loadContext(abort.signal, file);
+                    }
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            )}
           </div>
           <div
             className="chat-messages"
@@ -884,6 +960,16 @@ export default function App() {
           </div>
         </aside>
       </main>
+      {profileOpen && (
+        <ProfileModal
+          initialText={detailsText.current}
+          busy={profileBusy}
+          error={profileError}
+          onSubmit={(text) => void submitDetails(text)}
+          onDemo={chooseDemo}
+          onCancel={context ? () => setProfileOpen(false) : undefined}
+        />
+      )}
       {selected && (
         <MemberDialog onClose={() => setSelected(undefined)}>
           <p className="eyebrow">{members[selected].role}</p>

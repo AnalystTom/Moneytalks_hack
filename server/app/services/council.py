@@ -111,7 +111,14 @@ def _roast(roast: bool) -> str:
     return "ROAST MODE: roast the user's portfolio mercilessly, stay in character, keep it comedic, still no invented facts.\n" if roast else ""
 
 
+def _performance_gap(f: dict) -> str | None:
+    if any(p["weight_pct"] is None or p["pnl_pct"] is None for p in f["positions"]):
+        return "Current valuation or profit/loss is unavailable; missing prices and cost basis must be supplied before assessing concentration or performance."
+
+
 def _fill(text: str, f: dict) -> str:
+    if gap := _performance_gap(f):
+        return gap
     pos = f["positions"]
     worst = min(pos, key=lambda p: p["pnl_pct"])
     return text.format(
@@ -197,7 +204,7 @@ ADVICE_SCHEMA = (
 async def _analyse(member: str, run_id: str, brief: dict, a: Assignment, roast: bool, sources: list[Source]) -> Analysis:
     f = brief["facts"]
     headline, text = CANNED[member]
-    canned = Analysis(headline=CANNED_ROAST[member] if roast else headline, analysis=_fill(text, f),
+    canned = Analysis(headline=_fill(CANNED_ROAST[member] if roast else headline, f), analysis=_fill(text, f),
                       reasons=[_fill(text, f), f"Assignment: {a.questions[0]}"], names=_names(a.focus_tickers, a))
     if not llm.enabled():
         return canned
@@ -216,8 +223,12 @@ async def _analyse(member: str, run_id: str, brief: dict, a: Assignment, roast: 
 
 async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bool, research: dict[str, list[Source]], sources: list[Source]) -> Verdict:
     pos = {p["ticker"]: p for p in brief["facts"]["positions"]}
-    canned = Verdict(**an.model_dump(), sources=sources, advice=[CANNED_ADVICE[member]], positions=[
-        PositionCall(ticker=t, **dict(zip(("signal", "conviction", "rationale"), _call(member, pos[t])))) for t in an.names
+    gap = _performance_gap(brief["facts"])
+    fallback = an.model_copy(update={"headline": gap, "analysis": gap, "reasons": [gap]}) if gap else an
+    canned = Verdict(**fallback.model_dump(), sources=sources,
+                     advice=[Advice(action=gap, why=gap) if gap else CANNED_ADVICE[member]], positions=[
+        PositionCall(ticker=t, **dict(zip(("signal", "conviction", "rationale"), _call(member, pos[t]))))
+        for t in an.names if pos[t]["weight_pct"] is not None and pos[t]["pnl_pct"] is not None
     ])
     if llm.enabled():
         system = f"You are this council member:\n{_persona(member)}\n{ADVICE_SCHEMA}"
@@ -258,6 +269,8 @@ async def _member(member: str, run_id: str, brief: dict, a: Assignment, roast: b
 
 async def _rule(run_id: str, brief: dict, roast: bool, verdicts: dict[str, Verdict]) -> Chair:
     canned = coordinator.rule(verdicts, brief, roast)
+    if not canned.positions and (gap := _performance_gap(brief["facts"])):
+        return canned.model_copy(update={"consensus": gap, "summary": gap + " Parody council, not financial advice."})
     if not llm.enabled():
         return canned
     system = (
@@ -382,6 +395,8 @@ def _asked(text: str, run: dict) -> list[str]:
 
 
 def _canned_reply(member: str, run: dict, text: str, said: list[tuple[str, str]], roast: bool) -> str:
+    if gap := _performance_gap(run["brief"]["facts"]):
+        return gap
     v = run["verdicts"].get(member)
     if roast:
         return CANNED_ROAST[member]
@@ -456,6 +471,8 @@ async def _chair_answer(run: dict, text: str) -> str:
 def _canned_chair(run: dict) -> str:
     chair: Chair | None = run["chair"]
     verdicts = run["verdicts"]
+    if not any(v.positions for v in verdicts.values()) and (gap := _performance_gap(run["brief"]["facts"])):
+        return gap
     count = lambda sig: {m: sum(p.signal == sig for p in v.positions) for m, v in verdicts.items()}  # noqa: E731
     most = lambda sig: max(count(sig).items(), key=lambda mc: mc[1], default=(None, 0))  # noqa: E731
     (bull, nb), (bear, ns) = most("BUY"), most("SELL")
