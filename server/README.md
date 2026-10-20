@@ -51,10 +51,12 @@ on first use, so there is no schema or seed script. From `server/`, run SQL agai
 ## Env names
 
 Copy `../.env.example` to `../.env`; the server loads it on startup (shell variables win). All optional.
+Legacy `NICRRON_*` settings are no longer read; configure the `OPENAI_*` settings below and
+use [Deploy (Cloudflare)](#deploy-cloudflare) to upload them for the Worker.
 
 | name | effect |
 |---|---|
-| `OPENAI_API_KEY`, `OPENAI_MODEL` | set the key for live LLM answers (`https://api.openai.com/v1`); no key = canned events. An unset model selects `gpt-6-luna`; other model names are used as given |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | set the key for live LLM answers (`https://api.openai.com/v1`); no key = canned events. An unset or blank model selects `gpt-6-luna`; other model names are used as given |
 | `ELEVENLABS_API_KEY` | required for `/api/voice/speak` and `/api/voice/transcribe`; 503 without it |
 | `ELEVENLABS_VOICE_BUFFETT` / `_DALIO` / `_BURRY` / `_LEOPOLD` / `_CRAMER` / `_CHAIR`, `ELEVENLABS_VOICE_ID` | per-speaker voice overrides the shared voice; if neither is set, speech uses the first available premade voice returned by ElevenLabs, or 503 if none is available |
 | `ELEVENLABS_MODEL` | speech model, default `eleven_v4`; add to `.env` to override |

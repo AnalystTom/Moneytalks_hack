@@ -44,7 +44,7 @@ One file per member in `server/council/<member>.md`: philosophy, voice, signatur
 
 - Backend: Python (FastAPI) on Cloudflare Python Workers, with D1 holding briefs and runs (cached events are still planned). See [deployment](../server/README.md#deploy-cloudflare) for current storage. If Python Workers blocks a needed dependency, move the backend to Cloudflare Containers.
 - Frontend: React (Vite + TypeScript) with an HTML/CSS boardroom, served as the Worker's static assets.
-- LLM: OpenAI API (`https://api.openai.com/v1`, model `gpt-6-luna`).
+- LLM: OpenAI API; see [server environment settings](../server/README.md#env-names) for the model and credentials.
 - Research: per-member PRISM Knowledge Base retrieval; live web search is not connected.
 - Voice: ElevenLabs text-to-speech; see [server environment settings](../server/README.md#env-names) for voice selection.
 - Bank data: Plaid Sandbox over HTTP (`/sandbox/public_token/create` -> `/item/public_token/exchange` -> balances and transactions; no Link UI in v0).
