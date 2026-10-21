@@ -26,7 +26,7 @@ Open the Vite URL (normally `http://127.0.0.1:5173`). `/api` proxies to FastAPI 
 
 The page opens on a pop-up with one box for the user's own details (name, positions, cash, goals) and two buttons. **Submit** creates a personal brief through the [personal-details API](../server/README.md#personal-details) and closes the pop-up on success; errors keep it open with the server's message. That API documentation owns model requirements and missing-data behavior. **Use the demo** loads `data/portfolio.json` and `data/PERSONA.md` through Vite development endpoints or emitted build assets, normalizes broker positions, and ingests them with the existing API. "Change my details" in the chat header reopens the pop-up with the last accepted personal text. When context is already loaded, **Cancel** or Escape returns to it without changing the conversation. Accepting new details or choosing the demo clears the previous conversation and suggestion chips. The paperclip below only applies to the demo. The portfolio chip shows loading, unavailable or accepted context. The paperclip replaces CSV/JSON holdings while retaining the profile, then clears the previous conversation and suggestions only after the replacement is accepted. Context failures show an explicit error; Retry is available when no accepted context remains.
 
-Send a message to run the council. Returned verdicts and the neutral coordinator's ruling appear in chat. Reply to a returned member message for a named-member follow-up; clear the recipient to let the coordinator route the next turn. It can select individual members, a debate, the whole council, or itself for a recap. Returned follow-up chips send their question when selected. Failed or cancelled messages stay in the composer for retry. Roast mode is available in the header.
+Send a message to run the council. Returned verdicts and the neutral coordinator's ruling appear in chat. Reply to a returned member message for a named-member follow-up; clear the recipient to let the coordinator route the next turn. It can select individual members, a debate, the whole council, or itself for a recap. Returned follow-up chips send their question when selected. Use **Cancel session** during an initial question or follow-up to stop the request without resending it. Failed or cancelled messages stay in the composer for retry. Roast mode is available in the header.
 
 Five cartoon members sit around the curved table, including Ray Dalio. The coordinator is separate from the five specialists; its final ruling appears at Warren's seat. Stream events select idle, research, reveal, speaking and drum-roll poses. CSS transforms provide cutout motion and respect `prefers-reduced-motion`.
 
@@ -52,7 +52,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-GitHub Actions runs the format, lint, typecheck, unit tests and build checks plus the existing backend tests. The Playwright layout check is available through `test:browser`; set `COUNCIL_CHROMIUM_PATH` to an approved headless binary when using a preinstalled browser. The backend currently has no formatting, lint or typecheck scripts; adding them is separate work.
+GitHub Actions runs the format, lint, typecheck, unit tests and build checks plus the existing backend tests. The Playwright layout and cancellation checks are available through `test:browser`; set `COUNCIL_CHROMIUM_PATH` to an approved headless binary when using a preinstalled browser. The backend currently has no formatting, lint or typecheck scripts; adding them is separate work.
 
 ## Portrait asset
 
