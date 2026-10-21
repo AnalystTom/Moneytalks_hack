@@ -194,7 +194,7 @@ async def extract(text: str) -> Profile:
 
 
 async def build(text: str) -> dict:
-    """Extract and store a brief from free text; any non-empty text yields one."""
+    """Retain free text even when extraction is unreadable; model transport errors still propagate."""
     session = uuid.uuid4().hex
     started = time.perf_counter()
     profile = None

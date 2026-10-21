@@ -62,10 +62,13 @@ persona's total assets, not an additional balance to add to that total.
 
 The coordinator reads the brief and writes one **assignment** per specialist:
 
-- `focus_tickers`: the 2-4 holdings most relevant to that lens (e.g. Leopold gets NVDA, AMD, PLTR, MSFT).
+- `focus_tickers`: up to four labeled holdings most relevant to that lens (e.g. Leopold gets NVDA, AMD, PLTR, MSFT).
 - `questions`: 2-3 specific questions to answer (e.g. Dalio: "The brokerage is ~94% equities at beta
   1.53 and holds 38% of net worth; how does the whole balance sheet behave in a stagflation regime?").
 - Query counts and source limits are fixed by the orchestration implementation, not assignment fields.
+
+Unlabeled holdings are excluded from symbol-based research and calls. When no labeled holdings are supplied,
+assignments have no focus or shared tickers and ask about the user's notes and missing information.
 
 This is what makes it agentic rather than five copies of one prompt: each agent gets a different job.
 
@@ -81,7 +84,7 @@ whole portfolio**; calls are only ever on individual held names, and only after 
    analyst views / valuation retrieve from the member's assigned PRISM Knowledge Base documents.
    Sources are tagged with their ticker. This does not fetch live web results; missing credentials,
    retrieval failures or `COUNCIL_VERSION=v1` yield no KB sources. See [PRISM setup](../../docs/prism.md#1-knowledge-base).
-   The names are the two biggest holdings (`shared_tickers`, called by every member so the council
+   The names are the two biggest labeled holdings (`shared_tickers`, called by every member so the council
    can vote on them) plus the member's own picks, max 5.
 3. **Advise.** The analysis, the per-name research and the brief go in together; out come one
    **call per researched name** (BUY / HOLD / SELL + conviction + rationale) and 1-3 portfolio-level
@@ -90,8 +93,8 @@ whole portfolio**; calls are only ever on individual held names, and only after 
 Specialists do not see each other's work during the opening run, so their first calls are
 independent. Cross-talk starts in chat.
 
-When analysis or advice falls back and any position lacks weight or profit/loss, fallback headlines,
-analysis and advice state that valuation or performance data is unavailable. Fallback calls are included
+When analysis or advice falls back with incomplete portfolio data, fallback headlines, analysis and advice
+identify absent holdings, missing labels, or unavailable valuation or performance data. Fallback calls are included
 only for positions with both known weight and profit/loss. If none qualify, no synthetic votes enter the
 chair ruling; its consensus, spoken summary and fallback chat retain the unavailable message.
 Fallback member speech and chat also retain that message. See the regression coverage in

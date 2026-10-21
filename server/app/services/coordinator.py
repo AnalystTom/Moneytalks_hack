@@ -30,7 +30,7 @@ def _rank(positions: list[dict], pick, limit: int) -> list[str]:
 
 
 def plan(brief: dict) -> dict[str, Assignment]:
-    """One assignment per member: 2-4 focus tickers and 2-3 questions about this user."""
+    """Assign labeled holdings without inventing names for empty or unlabeled portfolios."""
     f = brief["facts"]
     pos = [p for p in f["positions"] if p["ticker"].strip()]
     if not pos:
