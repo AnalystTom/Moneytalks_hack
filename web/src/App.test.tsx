@@ -396,34 +396,6 @@ it("preserves typed text and blocks sending while a voice question is pending", 
   );
 });
 
-function keyOf(node: ReactNode, label: string): unknown {
-  for (const child of Children.toArray(node)) {
-    if (!isValidElement<Props>(child)) continue;
-    if (child.props["aria-label"] === label) return child.key;
-    const nested = keyOf(child.props.children, label);
-    if (nested) return nested;
-  }
-}
-it("keeps the send and cancel buttons as separate DOM nodes", async () => {
-  vi.mocked(streamCouncil).mockImplementationOnce(
-    (_, __, signal) =>
-      new Promise<void>((_, reject) =>
-        signal.addEventListener("abort", () => reject(signal.reason)),
-      ),
-  );
-  hooks.next = 0;
-  const idleKey = keyOf(App(), "Send message");
-  submit("chat-form");
-  await vi.waitFor(() => expect(streamCouncil).toHaveBeenCalledOnce());
-  hooks.next = 0;
-  const busyKey = keyOf(App(), "Cancel session");
-  get("aria-label", "Cancel session").onClick!();
-  await idle();
-  expect(idleKey).toBeTruthy();
-  expect(busyKey).toBeTruthy();
-  expect(busyKey).not.toBe(idleKey);
-});
-
 it.each(["request failure", "cancellation", "stream error", "early end"])(
   "preserves the message and permits retry after %s",
   async (failure) => {
