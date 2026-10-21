@@ -23,7 +23,7 @@ async def post_ingest(
 
 
 class TextIn(BaseModel):
-    text: str = Field(min_length=1, max_length=profile.MAX_CHARS)
+    text: str = Field(min_length=1, max_length=profile.MAX_CHARS, pattern=r"\S")  # not just whitespace
 
 
 @router.post("/ingest/text")

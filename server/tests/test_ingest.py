@@ -171,6 +171,7 @@ def test_ingest_text_needs_model_and_nonempty_text(client, monkeypatch):
     assert client.post("/api/ingest/text", json={"text": SAM}).status_code == 503
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     assert client.post("/api/ingest/text", json={"text": ""}).status_code == 422
+    assert client.post("/api/ingest/text", json={"text": "  \n "}).status_code == 422
     assert client.post("/api/ingest/text", json={"text": "x" * 4001}).status_code == 422
 
 
