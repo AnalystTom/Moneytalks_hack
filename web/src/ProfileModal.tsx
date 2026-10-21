@@ -45,7 +45,8 @@ export default function ProfileModal({
         <h2>Tell the council about you</h2>
         <p className="muted">
           Your name, positions (shares and cost, or dollar amounts), cash,
-          goals, horizon and risk. Only what you write is used.
+          goals, horizon and risk. Write it your way: indexes, gold, crypto and
+          accounts are fine. Only what you write is used.
         </p>
         <textarea
           id="profile-details"

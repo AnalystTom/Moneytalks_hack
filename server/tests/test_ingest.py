@@ -104,22 +104,55 @@ def test_ingest_text_leaves_missing_fields_missing(client, model):
     assert body["card"]["title"] == "Context loaded"
 
 
-@pytest.mark.parametrize(
-    "tweak, text, message",
-    [
-        ({"cash": 50000}, SAM, "cash (50000) isn't in what you wrote"),
-        ({"age": 45}, SAM, "age (45) isn't in what you wrote"),
-        ({"positions": []}, SAM, "couldn't find any holdings"),
-        ({"positions": [{"ticker": "AAPL", "shares": 400, "cost_basis": 150, "amount": None}]}, SAM, "AAPL shares (400)"),
-        ({"positions": [{"ticker": "AAPL", "shares": None, "cost_basis": None, "amount": None}]}, SAM, "How much AAPL"),
-        ({"positions": [{"ticker": "TSLA", "shares": 40, "cost_basis": 150, "amount": None}]}, SAM, "didn't see TSLA"),
-        ({"positions": [{"ticker": "not a ticker", "shares": 5, "cost_basis": 1, "amount": None}]}, "5 shares", "doesn't look like a ticker"),
-    ],
-)
-def test_ingest_text_rejects_invented_or_unusable_values(client, model, tweak, text, message):
-    model["value"] = _profile(**tweak)
-    r = client.post("/api/ingest/text", json={"text": text})
-    assert r.status_code == 422 and message in r.json()["detail"]
+CAPTAIN = "I'm Tom. 50k in ISA/stocks. Mostly AI. / I have some palanatir 1000 / Meta 2000 / Sp500 10000 / Gold 5000 / BTC 6000"
+CAPTAIN_LABELS = ["ISA/STOCKS", "PLTR", "META", "S&P 500", "GOLD", "BTC"]
+
+
+def _captain(**over):
+    pos = lambda t, a: {"ticker": t, "shares": None, "cost_basis": None, "amount": a}  # noqa: E731
+    return _profile(name="Tom", age=None, cash=None, goals="mostly AI", horizon=None, risk=None, notes="Mostly AI", positions=[
+        pos("ISA/stocks", 50000), pos("PLTR", 1000), pos("META", 2000), pos("S&P 500", 10000), pos("Gold", 5000), pos("BTC", 6000)
+    ], **over)
+
+
+def test_ingest_text_accepts_index_gold_crypto_and_accounts_and_the_council_answers_about_all(client, model, monkeypatch):
+    model["value"] = _captain()
+    r = client.post("/api/ingest/text", json={"text": CAPTAIN})
+    assert r.status_code == 200, r.text
+    brief = ingest.BRIEFS[r.json()["brief_id"]]
+    assert sorted(p["ticker"] for p in brief["facts"]["positions"]) == sorted(CAPTAIN_LABELS)
+    assert "Mostly AI" in brief["persona"]
+
+    prompts = []
+
+    async def spy(system, user, response_format=None):
+        prompts.append(user)
+        raise ValueError("canned")  # every member falls back; the point is what the council was shown
+
+    monkeypatch.setattr(llm, "complete_json", spy)
+    events = run_council(client, r.json()["brief_id"])[1]
+    assert events[-1][0] == "run.done"
+    assert prompts and all(label in prompts[0] for label in CAPTAIN_LABELS)
+
+
+def test_ingest_text_never_blocks_on_what_the_user_typed(client, model):
+    model["value"] = _profile(cash=50000, age=45, positions=[
+        {"ticker": "not a ticker", "shares": 5, "cost_basis": 1, "amount": None},
+        {"ticker": "TSLA", "shares": None, "cost_basis": None, "amount": None},
+    ])
+    r = client.post("/api/ingest/text", json={"text": "5 shares of something odd, and TSLA"})
+    assert r.status_code == 200, r.text
+    f = ingest.BRIEFS[r.json()["brief_id"]]["facts"]
+    assert [p["ticker"] for p in f["positions"]] == ["NOT A TICKER", "TSLA"] and f["positions"][0]["shares"] == 5
+    assert "cash" in r.json()["missing"] and "age" in r.json()["missing"]  # invented figures are dropped, not trusted
+
+
+def test_ingest_text_without_positions_passes_the_words_on(client, model):
+    model["value"] = _profile(positions=[], cash=None, age=None, notes=None)
+    r = client.post("/api/ingest/text", json={"text": "I have a house and a pension"})
+    assert r.status_code == 200, r.text
+    brief = ingest.BRIEFS[r.json()["brief_id"]]
+    assert "I have a house and a pension" in brief["persona"]
 
 
 def test_ingest_text_accepts_suffixed_and_comma_numbers():
@@ -127,10 +160,11 @@ def test_ingest_text_accepts_suffixed_and_comma_numbers():
     assert 5 in profile._numbers("5 months")  # "m" in "months" is not a million
 
 
-def test_ingest_text_unreadable_model_reply_is_a_clear_422(client, model):
+def test_ingest_text_unreadable_model_reply_falls_back_to_the_users_words(client, model):
     model["value"] = {"surprise": True}
     r = client.post("/api/ingest/text", json={"text": SAM})
-    assert r.status_code == 422 and "couldn't read" in r.json()["detail"]
+    assert r.status_code == 200 and "surprise" not in r.text
+    assert "Surprise" not in r.text and SAM in ingest.BRIEFS[r.json()["brief_id"]]["persona"]
 
 
 def test_ingest_text_needs_model_and_nonempty_text(client, monkeypatch):
@@ -153,7 +187,7 @@ def test_ingest_text_brief_drives_council(client, model, monkeypatch):
     assert all(v["positions"] == [] for v in verdicts)
 
 
-@pytest.mark.parametrize("failure", [None, "validation", "schema", "provider"])
+@pytest.mark.parametrize("failure", [None, "provider"])
 def test_ingest_text_is_traced_to_prism_without_personal_data(client, model, monkeypatch, failure):
     requests = []
 
@@ -164,13 +198,13 @@ def test_ingest_text_is_traced_to_prism_without_personal_data(client, model, mon
     original = httpx.AsyncClient
     monkeypatch.setattr(profile.prism, "_auth", lambda: ("https://trace.test", {}, "project"))
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(**kw, transport=httpx.MockTransport(capture)))
-    model["value"] = _profile(positions=[]) if failure == "validation" else {"surprise": True} if failure == "schema" else _profile()
+    model["value"] = _profile()
     if failure == "provider":
         async def fail(*args):
             raise httpx.ConnectError(SAM)
         monkeypatch.setattr(llm, "complete_json", fail)
     response = client.post("/api/ingest/text", json={"text": SAM})
-    assert response.status_code == (502 if failure == "provider" else 422 if failure else 200)
+    assert response.status_code == (502 if failure else 200)
     assert [path for path, _ in requests] == ["/api/traces", "/api/spans/ingest"]
     trace, spans = [body for _, body in requests]
     assert trace["input_messages"] == [{"role": "user", "content": ""}]
@@ -179,7 +213,7 @@ def test_ingest_text_is_traced_to_prism_without_personal_data(client, model, mon
     assert metadata["model"] == trace["model"] == llm.model()
     assert metadata["latency_ms"] >= 0
     assert metadata["success"] is (failure is None)
-    assert metadata["field_count"] == (0 if failure in ("schema", "provider") else 7)
+    assert metadata["field_count"] == (0 if failure else 7)
     assert metadata["position_field_count"] == (5 if failure is None else 0)
     assert len(spans["spans"]) == 1
     span = spans["spans"][0]

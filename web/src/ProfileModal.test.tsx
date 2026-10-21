@@ -86,6 +86,16 @@ it("submits the trimmed text and never submits an empty box", () => {
   expect(event.preventDefault).toHaveBeenCalled();
 });
 
+it("submits free-form holdings as typed: indexes, gold, crypto, accounts and misspellings", () => {
+  const entry =
+    "I'm Tom. 50k in ISA/stocks. Mostly AI. / I have some palanatir 1000 / Meta 2000 / Sp500 10000 / Gold 5000 / BTC 6000";
+  view().box.props.onChange({ target: { value: entry } });
+  const v = view();
+  expect(v.submit.props.disabled).toBe(false);
+  v.form.props.onSubmit({ preventDefault: vi.fn() });
+  expect(onSubmit).toHaveBeenCalledWith(entry);
+});
+
 it("the demo button runs the demo", () => {
   view().demo.props.onClick();
   expect(onDemo).toHaveBeenCalledOnce();
