@@ -116,9 +116,12 @@ in the [web journey](../web/README.md#journey).
 
 ### Personal details
 
-`POST /api/ingest/text` accepts one JSON `text` string (1–4,000 characters). It needs `OPENAI_API_KEY`
-to extract a profile and at least one holding with a ticker and a share count or dollar amount.
-Request validation or rejected extraction returns 422; an unconfigured model returns 503;
+`POST /api/ingest/text` accepts one JSON `text` string (1–4,000 characters, not only whitespace). It needs `OPENAI_API_KEY`
+to extract a profile. Holdings may use labels present in the user's text without a recognized ticker or size;
+company names and misspellings are not translated into symbols. Notes contain only the original submitted text,
+trimmed of surrounding whitespace; account totals stay there rather than adding to asset values.
+An empty portfolio is supported, and unreadable extraction retains the submitted notes without inventing holdings.
+Request validation returns 422; an unconfigured model returns 503;
 model HTTP failures return 502. Extraction schemas and validation live in
 [`app/services/profile.py`](app/services/profile.py).
 
@@ -130,8 +133,9 @@ curl -H 'content-type: application/json' \
 
 The response adds a context `card` and a `missing` list to the usual `brief_id` and `summary`.
 Reported dollar amounts stay amounts; this path fetches no market prices and connects no bank account.
-Repeated tickers are consolidated, retaining supplied lots; totals and share-weighted cost basis are
-calculated only when all required lot values are present. Missing shares, cost basis and profile details
+Repeated non-empty labels are uppercased and consolidated, retaining supplied lots; unlabeled holdings stay
+separate without invented names. Totals and share-weighted cost basis are calculated only when all required
+lot values are present. Missing shares, cost basis and profile details
 remain unknown and are called out on the card. Valuation and profit/loss are marked unavailable when
 their inputs are absent. Missing cash stays unknown; explicit zero cash is retained. Cash-dependent
 totals and ratios require known cash and holdings value; brokerage/net-worth ratios also require nonzero net worth.

@@ -1,14 +1,15 @@
 """Free text about the user (name, positions, cash, goals) -> the same brief `/api/ingest` builds.
 
-The model only extracts: every figure it returns must appear in the user's own text, and anything the user left out
-stays null and is called out in the brief, so the council never reasons over invented holdings or amounts.
+The model only extracts: every figure it returns must appear in the user's own text (otherwise it is dropped and
+called out in the brief), and anything the user left out stays null, so the council never reasons over invented amounts.
+Holdings keep the user's labels; account totals and unreadable text go to the council in the original notes.
 """
 import json
 import re
 import time
 import uuid
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.services import ingest, llm, prism
 
@@ -17,7 +18,9 @@ MAX_CHARS = 4000
 
 class Position(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    ticker: str
+    ticker: str | None
+    label: str | None = Field(default=None, exclude=True)
+    is_account: bool = Field(default=False, exclude=True)
     shares: float | None
     cost_basis: float | None  # per share
     amount: float | None  # dollars held, when the user gave a value instead of shares
@@ -33,6 +36,7 @@ class Profile(BaseModel):
     goals: str | None
     horizon: str | None
     risk: str | None
+    notes: str | None = None
 
 
 def _nullable(kind: str) -> dict:
@@ -51,7 +55,8 @@ RESPONSE_FORMAT = {
         "schema": _object({
             "name": _nullable("string"), "age": _nullable("integer"),
             "positions": {"type": "array", "items": _object({
-                "ticker": {"type": "string"}, "shares": _nullable("number"),
+                "ticker": _nullable("string"), "label": _nullable("string"), "is_account": {"type": "boolean"},
+                "shares": _nullable("number"),
                 "cost_basis": _nullable("number"), "amount": _nullable("number"),
             })},
             "cash": _nullable("number"), "net_worth": _nullable("number"),
@@ -64,12 +69,14 @@ SYSTEM = f"""You extract an investor's details from one block of free text. The 
 Reply with only a JSON object matching this JSON schema: {json.dumps(RESPONSE_FORMAT["json_schema"]["schema"])}
 Rules:
 - Copy only what the text states. If something is not stated, use null. Never guess, infer, estimate or round.
-- ticker: the stock/ETF symbol exactly as written in the text, in capitals. Skip a holding that is only named by company, with no symbol.
+- label: the holding's name exactly as written, including misspellings, indexes, gold and crypto. Do not translate company names or correct spelling.
+- ticker: a stock/ETF symbol only if explicitly written in the text, otherwise null. Never infer a symbol from a company name or label.
+- is_account: true for account or pot totals (including ISA/stocks, pensions and brokerage accounts), false for individual assets. Account totals are context, never additive holdings alongside their contents.
 - shares: number of shares. cost_basis: the price paid PER SHARE ("40 shares at $150" -> 150).
 - amount: dollars held in a position when the text gives a value instead of shares ("$8k in VOO" -> 8000). Use "k"=1000, "m"=1000000.
 - cash: uninvested cash. net_worth: only if the text states a total net worth.
 - goals, horizon, risk: short phrases using the user's own words ("house deposit", "5 years", "medium").
-- positions: every position the text names, none it does not."""
+- positions: every holding or account total the text names, none it does not. If none are named, return an empty list."""
 
 NUMBER = re.compile(r"(\d[\d,]*(?:\.\d+)?)(?:\s*([kKmM])(?![a-zA-Z]))?")
 
@@ -82,42 +89,45 @@ def _numbers(text: str) -> list[float]:
     return out
 
 
-def validate(profile: Profile, text: str) -> list[str]:
-    """Reject missing sizes and numbers the user never wrote."""
-    problems = []
-    if not profile.positions:
-        problems.append("I couldn't find any holdings in that. Add at least one position, like “40 shares of AAPL at $150”.")
+def _source_label(label: str | None, text: str) -> str | None:
+    if label and label.strip():
+        match = re.search(rf"(?<!\w){re.escape(label.strip())}(?!\w)", text, re.IGNORECASE)
+        return match.group() if match else None
+    return None
+
+
+def sanitize(profile: Profile, text: str) -> Profile:
+    """Keep source-grounded assets and figures, and retain the submitted text as notes."""
     seen = _numbers(text)
-    figures = [("age", profile.age), ("cash", profile.cash), ("net worth", profile.net_worth)]
+    ok = lambda v: v is not None and v >= 0 and any(abs(v - n) < 1e-6 * max(1, n) for n in seen)  # noqa: E731
+    keep = lambda v: v if ok(v) else None  # noqa: E731
+    size = lambda v: v if ok(v) and v > 0 else None  # noqa: E731
+    positions = []
     for p in profile.positions:
-        t = p.ticker.strip().upper()
-        if not re.fullmatch(r"[A-Z][A-Z.\-]{0,5}", t):
-            problems.append(f"“{p.ticker}” doesn't look like a ticker symbol.")
+        if p.is_account:
             continue
-        if not re.search(rf"(?<![A-Za-z]){re.escape(t)}(?![A-Za-z])", text, re.IGNORECASE):
-            problems.append(f"I didn't see {t} in what you wrote. Please use ticker symbols, like AAPL.")
+        label = _source_label(p.ticker, text) or _source_label(p.label, text)
+        if label is None and ((p.ticker or "").strip() or (p.label or "").strip()):
             continue
-        figures += [(f"{t} shares", p.shares), (f"{t} cost", p.cost_basis), (f"{t} amount", p.amount)]
-        if p.shares is None and p.amount is None:
-            problems.append(f"How much {t} do you hold? Give a share count or a dollar amount.")
-        elif (p.shares is not None and p.shares <= 0) or (p.amount is not None and p.amount <= 0):
-            problems.append(f"{t} needs a positive size.")
-    for label, value in figures:
-        if value is not None and not any(abs(value - n) < 1e-6 * max(1, n) for n in seen):
-            problems.append(f"The {label} ({value:g}) isn't in what you wrote, so I left it out. Please state it or remove it.")
-    return problems
+        positions.append(p.model_copy(update={"ticker": label or "", "shares": size(p.shares),
+                                               "cost_basis": keep(p.cost_basis), "amount": size(p.amount)}))
+    return profile.model_copy(update={
+        "positions": positions, "notes": text.strip(),
+        "age": profile.age if profile.age is not None and ok(profile.age) else None,
+        "cash": keep(profile.cash), "net_worth": keep(profile.net_worth),
+    })
 
 
 def holdings(profile: Profile) -> list[dict]:
-    """One holding per ticker, retaining unknown totals and the supplied lots."""
+    """Consolidated named lots and separate unnamed holdings, retaining unknown totals."""
     grouped: dict[str, list[dict]] = {}
     for p in profile.positions:
         t = p.ticker.strip().upper()
         grouped.setdefault(t, []).append({**p.model_dump(), "ticker": t})
     out = []
     for t, lots in grouped.items():
-        if len(lots) == 1:
-            out.append(lots[0])
+        if not t or len(lots) == 1:
+            out.extend(lots)
             continue
         shares = sum(p["shares"] for p in lots) if all(p["shares"] is not None for p in lots) else None
         amount = sum(p["amount"] for p in lots) if all(p["amount"] is not None for p in lots) else None
@@ -131,8 +141,8 @@ def missing(profile: Profile) -> list[str]:
         ("name", profile.name), ("age", profile.age), ("cash", profile.cash), ("goals", profile.goals),
         ("investment horizon", profile.horizon), ("risk tolerance", profile.risk),
     ] if value is None]
-    gaps += [f"cost basis for {p.ticker.strip().upper()}" for p in profile.positions if p.cost_basis is None]
-    gaps += [f"share count for {p.ticker.strip().upper()}" for p in profile.positions if p.shares is None]
+    gaps += [f"cost basis for {p.ticker.strip().upper() or 'unlabeled holdings'}" for p in profile.positions if p.cost_basis is None]
+    gaps += [f"share count for {p.ticker.strip().upper() or 'unlabeled holdings'}" for p in profile.positions if p.shares is None]
     return list(dict.fromkeys(gaps))
 
 
@@ -143,6 +153,8 @@ def persona(profile: Profile, gaps: list[str]) -> str:
     lines = ["# Persona Profile (self-reported)", "", "| Attribute | Details |", "| --- | --- |"]
     lines += [f"| **{k}** | {v} |" for k, v in rows if v]
     lines += [f"- **{k}:** {v}" for k, v in [("Goal", profile.goals), ("Horizon", profile.horizon), ("Risk tolerance", profile.risk)] if v]
+    if profile.notes:
+        lines += [f"- **Notes (user's words):** {profile.notes}"]
     if gaps:
         lines += ["", "Not provided by the user (do not guess or invent these; say they are unknown if asked): " + ", ".join(gaps) + "."]
     return "\n".join(lines)
@@ -152,20 +164,23 @@ def card(profile: Profile, f: dict, gaps: list[str]) -> dict:
     """Context card for the chat, built only from what the user gave."""
     who = (profile.name or "").strip() and f"{profile.name.split()[0]}{f', {profile.age}' if profile.age else ''}"
     value = f["holdings_value"]
-    lines = [f"${value:,.0f} across {len(f['positions'])} holdings" if value is not None else f"{len(f['positions'])} holdings — total valuation unavailable"]
+    lines = ["No holdings provided" if not f["positions"] else
+             f"${value:,.0f} across {len(f['positions'])} holdings" if value is not None else f"{len(f['positions'])} holdings — total valuation unavailable"]
     for holding in f["positions"]:
         for lot in holding.get("lots", [holding]):
             details = [f"{lot['shares']:g} shares" if lot["shares"] is not None else "share count not given"]
             if lot.get("amount") is not None:
                 details.append(f"${lot['amount']:,.2f} reported amount")
             details.append(f"${lot['cost_basis']:g} cost basis per share" if lot["cost_basis"] is not None else "cost basis not given")
-            lines.append(f"{holding['ticker']}: " + ", ".join(details))
+            lines.append((f"{holding['ticker']}: " if holding["ticker"] else "") + ", ".join(details))
     if f["unrealized_pl_pct"] is None:
         lines.append("Profit/loss unavailable: current prices or cost basis not provided")
     if f.get("broker_cash") is not None:
         lines.append(f"Cash: ${f['broker_cash']:,.0f}")
     if profile.goals:
         lines.append(f"Goal: {profile.goals}" + (f" in {profile.horizon}" if profile.horizon else ""))
+    if profile.notes:
+        lines.append(f"Notes: {profile.notes}")
     if gaps:
         lines.append("Not given: " + ", ".join(gaps))
     return {"title": f"{who} — context loaded" if who else "Context loaded", "lines": lines}
@@ -174,20 +189,18 @@ def card(profile: Profile, f: dict, gaps: list[str]) -> dict:
 async def extract(text: str) -> Profile:
     try:
         return Profile.model_validate(await llm.complete_json(SYSTEM, text, RESPONSE_FORMAT))
-    except (ValidationError, ValueError) as e:
-        raise ValueError("I couldn't read those details. Try listing your name, positions and goals in plain sentences.") from e
+    except (ValidationError, ValueError):  # unreadable reply: hand the council the user's own words
+        return Profile(name=None, age=None, positions=[], cash=None, net_worth=None, goals=None, horizon=None, risk=None)
 
 
 async def build(text: str) -> dict:
-    """Extract, validate and store a brief from free text; raises ValueError (message safe to show) when it can't."""
+    """Retain free text even when extraction is unreadable; model transport errors still propagate."""
     session = uuid.uuid4().hex
     started = time.perf_counter()
     profile = None
     ok = False
     try:
-        profile = await extract(text)
-        if problems := validate(profile, text):
-            raise ValueError(" ".join(problems))
+        profile = sanitize(await extract(text), text)
         ok = True
     finally:
         metadata = {"model": llm.model(), "latency_ms": round((time.perf_counter() - started) * 1000), "success": ok,

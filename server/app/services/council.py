@@ -112,6 +112,10 @@ def _roast(roast: bool) -> str:
 
 
 def _performance_gap(f: dict) -> str | None:
+    if not f["positions"]:
+        return "No holdings were provided; positions, concentration and performance cannot be assessed from the user's notes alone."
+    if any(not p["ticker"].strip() for p in f["positions"]):
+        return "Some holdings are unlabeled; their names are needed for position-specific research and calls."
     if any(p["weight_pct"] is None or p["pnl_pct"] is None for p in f["positions"]):
         return "Current valuation or profit/loss is unavailable; missing prices and cost basis must be supplied before assessing concentration or performance."
 
@@ -128,12 +132,12 @@ def _fill(text: str, f: dict) -> str:
 
 
 def _held(brief: dict) -> list[str]:
-    return [p["ticker"] for p in brief["facts"]["positions"]]
+    return [p["ticker"] for p in brief["facts"]["positions"] if p["ticker"].strip()]
 
 
 def _names(picked: list[str], a: Assignment) -> list[str]:
     """Names to research and call: the shared biggest holdings first, then the member's own picks."""
-    return list(dict.fromkeys([*a.shared_tickers, *picked]))[:MAX_NAMES]
+    return [t for t in dict.fromkeys([*a.shared_tickers, *picked]) if t.strip()][:MAX_NAMES]
 
 
 def _sources_json(sources: list[Source]) -> str:
@@ -145,7 +149,7 @@ def _sources_json(sources: list[Source]) -> str:
 
 async def _plan(run_id: str, brief: dict) -> dict[str, Assignment]:
     canned = coordinator.plan(brief)
-    if not llm.enabled():
+    if not llm.enabled() or not _held(brief):
         return canned
     system = (
         f"{_persona(CHAIR)}\nDo Job 1 only. Reply with only a JSON object keyed by member id "
@@ -222,13 +226,13 @@ async def _analyse(member: str, run_id: str, brief: dict, a: Assignment, roast: 
 
 
 async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bool, research: dict[str, list[Source]], sources: list[Source]) -> Verdict:
-    pos = {p["ticker"]: p for p in brief["facts"]["positions"]}
+    pos = {p["ticker"]: p for p in brief["facts"]["positions"] if p["ticker"].strip()}
     gap = _performance_gap(brief["facts"])
     fallback = an.model_copy(update={"headline": gap, "analysis": gap, "reasons": [gap]}) if gap else an
     canned = Verdict(**fallback.model_dump(), sources=sources,
                      advice=[Advice(action=gap, why=gap) if gap else CANNED_ADVICE[member]], positions=[
         PositionCall(ticker=t, **dict(zip(("signal", "conviction", "rationale"), _call(member, pos[t]))))
-        for t in an.names if pos[t]["weight_pct"] is not None and pos[t]["pnl_pct"] is not None
+        for t in an.names if t in pos and pos[t]["weight_pct"] is not None and pos[t]["pnl_pct"] is not None
     ])
     if llm.enabled():
         system = f"You are this council member:\n{_persona(member)}\n{ADVICE_SCHEMA}"
@@ -252,8 +256,10 @@ async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bo
 async def _member(member: str, run_id: str, brief: dict, a: Assignment, roast: bool, emit) -> Verdict:
     """Stage 1 analyse the portfolio -> stage 2 research each name -> stage 3 per-name calls + advice."""
     await emit("member.status", {"member": member, "status": "researching"})
-    first, every = a.focus_tickers[0], " ".join(a.focus_tickers)
-    lens = await _search(member, [q.format(first, all=every) for q in QUERIES[member]][:LENS_QUERIES], emit)
+    lens = []
+    if a.focus_tickers:
+        first, every = a.focus_tickers[0], " ".join(a.focus_tickers)
+        lens = await _search(member, [q.format(first, all=every) for q in QUERIES[member]][:LENS_QUERIES], emit)
     await emit("member.status", {"member": member, "status": "analysing"})
     an = await _analyse(member, run_id, brief, a, roast, lens)
     await emit("member.analysis", {"member": member, **an.model_dump()})
@@ -482,8 +488,7 @@ def _canned_chair(run: dict) -> str:
 
 def chat(run: dict, run_id: str, text: str, to: list[str], roast: bool) -> AsyncIterator[str]:
     async def body(emit) -> None:
-        holdings = [h["ticker"] for h in run["brief"]["holdings"]]
-        speakers, reason, routed_roast = coordinator.route(text, to, run["verdicts"], holdings)
+        speakers, reason, routed_roast = coordinator.route(text, to, run["verdicts"], _held(run["brief"]))
         turn_roast = roast or routed_roast
         await emit("chat.routed", {"members": speakers, "reason": reason})
         await prism.span(run_id, "council.route", "agent", text, f"{speakers}: {reason}")
