@@ -112,6 +112,8 @@ def _roast(roast: bool) -> str:
 
 
 def _performance_gap(f: dict) -> str | None:
+    if not f["positions"]:
+        return "No holdings were provided; positions, concentration and performance cannot be assessed from the user's notes alone."
     if any(p["weight_pct"] is None or p["pnl_pct"] is None for p in f["positions"]):
         return "Current valuation or profit/loss is unavailable; missing prices and cost basis must be supplied before assessing concentration or performance."
 
@@ -145,7 +147,7 @@ def _sources_json(sources: list[Source]) -> str:
 
 async def _plan(run_id: str, brief: dict) -> dict[str, Assignment]:
     canned = coordinator.plan(brief)
-    if not llm.enabled():
+    if not llm.enabled() or not brief["facts"]["positions"]:
         return canned
     system = (
         f"{_persona(CHAIR)}\nDo Job 1 only. Reply with only a JSON object keyed by member id "
@@ -252,8 +254,10 @@ async def _advise(member: str, run_id: str, brief: dict, an: Analysis, roast: bo
 async def _member(member: str, run_id: str, brief: dict, a: Assignment, roast: bool, emit) -> Verdict:
     """Stage 1 analyse the portfolio -> stage 2 research each name -> stage 3 per-name calls + advice."""
     await emit("member.status", {"member": member, "status": "researching"})
-    first, every = a.focus_tickers[0], " ".join(a.focus_tickers)
-    lens = await _search(member, [q.format(first, all=every) for q in QUERIES[member]][:LENS_QUERIES], emit)
+    lens = []
+    if a.focus_tickers:
+        first, every = a.focus_tickers[0], " ".join(a.focus_tickers)
+        lens = await _search(member, [q.format(first, all=every) for q in QUERIES[member]][:LENS_QUERIES], emit)
     await emit("member.status", {"member": member, "status": "analysing"})
     an = await _analyse(member, run_id, brief, a, roast, lens)
     await emit("member.analysis", {"member": member, **an.model_dump()})

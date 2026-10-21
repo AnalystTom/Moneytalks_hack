@@ -105,14 +105,15 @@ def test_ingest_text_leaves_missing_fields_missing(client, model):
 
 
 CAPTAIN = "I'm Tom. 50k in ISA/stocks. Mostly AI. / I have some palanatir 1000 / Meta 2000 / Sp500 10000 / Gold 5000 / BTC 6000"
-CAPTAIN_LABELS = ["ISA/STOCKS", "PLTR", "META", "S&P 500", "GOLD", "BTC"]
+CAPTAIN_LABELS = ["PALANATIR", "META", "SP500", "GOLD", "BTC"]
 
 
-def _captain(**over):
-    pos = lambda t, a: {"ticker": t, "shares": None, "cost_basis": None, "amount": a}  # noqa: E731
+def _captain():
+    pos = lambda t, a, **extra: {"ticker": t, "shares": None, "cost_basis": None, "amount": a, **extra}  # noqa: E731
     return _profile(name="Tom", age=None, cash=None, goals="mostly AI", horizon=None, risk=None, notes="Mostly AI", positions=[
-        pos("ISA/stocks", 50000), pos("PLTR", 1000), pos("META", 2000), pos("S&P 500", 10000), pos("Gold", 5000), pos("BTC", 6000)
-    ], **over)
+        pos("ISA/stocks", 50000, is_account=True), pos("PLTR", 1000, label="palanatir"), pos("META", 2000),
+        pos("S&P 500", 10000, label="Sp500"), pos("Gold", 5000), pos("BTC", 6000)
+    ])
 
 
 def test_ingest_text_accepts_index_gold_crypto_and_accounts_and_the_council_answers_about_all(client, model, monkeypatch):
@@ -121,7 +122,9 @@ def test_ingest_text_accepts_index_gold_crypto_and_accounts_and_the_council_answ
     assert r.status_code == 200, r.text
     brief = ingest.BRIEFS[r.json()["brief_id"]]
     assert sorted(p["ticker"] for p in brief["facts"]["positions"]) == sorted(CAPTAIN_LABELS)
-    assert "Mostly AI" in brief["persona"]
+    assert brief["facts"]["holdings_value"] == 24000
+    assert f"Notes: {CAPTAIN}" in r.json()["card"]["lines"]
+    assert CAPTAIN in brief["persona"]
 
     prompts = []
 
@@ -133,26 +136,127 @@ def test_ingest_text_accepts_index_gold_crypto_and_accounts_and_the_council_answ
     events = run_council(client, r.json()["brief_id"])[1]
     assert events[-1][0] == "run.done"
     assert prompts and all(label in prompts[0] for label in CAPTAIN_LABELS)
+    assert CAPTAIN in prompts[0]
+
+
+@pytest.mark.parametrize("account", ["ISA", "pension", "rainy-day pot"])
+def test_ingest_text_account_totals_are_context_not_additive_holdings(client, model, account):
+    text = f"My {account} contains $10k, all in SP500"
+    model["value"] = _profile(positions=[
+        {"ticker": None, "label": account, "is_account": True, "shares": None, "cost_basis": None, "amount": 10000},
+        {"ticker": None, "label": "SP500", "is_account": False, "shares": None, "cost_basis": None, "amount": 10000},
+    ])
+    response = client.post("/api/ingest/text", json={"text": text})
+    assert response.status_code == 200, response.text
+    brief = ingest.BRIEFS[response.json()["brief_id"]]
+    assert brief["facts"]["holdings_value"] == 10000
+    assert [(p["ticker"], p["weight_pct"]) for p in brief["facts"]["positions"]] == [("SP500", 100)]
+    assert text in brief["persona"]
+    assert f"Notes: {text}" in response.json()["card"]["lines"]
 
 
 def test_ingest_text_never_blocks_on_what_the_user_typed(client, model):
     model["value"] = _profile(cash=50000, age=45, positions=[
-        {"ticker": "not a ticker", "shares": 5, "cost_basis": 1, "amount": None},
+        {"ticker": "not a ticker", "label": "something odd", "shares": 5, "cost_basis": 1, "amount": None},
         {"ticker": "TSLA", "shares": None, "cost_basis": None, "amount": None},
     ])
     r = client.post("/api/ingest/text", json={"text": "5 shares of something odd, and TSLA"})
     assert r.status_code == 200, r.text
     f = ingest.BRIEFS[r.json()["brief_id"]]["facts"]
-    assert [p["ticker"] for p in f["positions"]] == ["NOT A TICKER", "TSLA"] and f["positions"][0]["shares"] == 5
+    assert [p["ticker"] for p in f["positions"]] == ["SOMETHING ODD", "TSLA"] and f["positions"][0]["shares"] == 5
     assert "cash" in r.json()["missing"] and "age" in r.json()["missing"]  # invented figures are dropped, not trusted
 
 
-def test_ingest_text_without_positions_passes_the_words_on(client, model):
-    model["value"] = _profile(positions=[], cash=None, age=None, notes=None)
-    r = client.post("/api/ingest/text", json={"text": "I have a house and a pension"})
-    assert r.status_code == 200, r.text
-    brief = ingest.BRIEFS[r.json()["brief_id"]]
-    assert "I have a house and a pension" in brief["persona"]
+@pytest.mark.parametrize("label, expected", [("AAPL", ["AAPL"]), (None, [])])
+def test_ingest_text_drops_invented_symbols_and_notes_without_blocking(client, model, label, expected):
+    model["value"] = _profile(notes="I also hold $999999 in TSLA", positions=[
+        {"ticker": "TSLA", "label": label, "shares": 40, "cost_basis": 150, "amount": None},
+    ])
+    response = client.post("/api/ingest/text", json={"text": SAM})
+    assert response.status_code == 200, response.text
+    brief = ingest.BRIEFS[response.json()["brief_id"]]
+    assert [p["ticker"] for p in brief["facts"]["positions"]] == expected
+    assert f"Notes: {SAM}" in response.json()["card"]["lines"]
+    assert SAM in brief["persona"]
+    assert "TSLA" not in json.dumps(brief) + response.text
+    assert "999999" not in json.dumps(brief) + response.text
+
+
+@pytest.mark.parametrize("label", ["", "  ", None])
+def test_ingest_text_does_not_name_unlabeled_positions(client, model, label):
+    model["value"] = _profile(positions=[{"ticker": label, "shares": 5, "cost_basis": None, "amount": None}])
+    response = client.post("/api/ingest/text", json={"text": "I own 5 shares"})
+    assert response.status_code == 200, response.text
+    brief = ingest.BRIEFS[response.json()["brief_id"]]
+    assert [p["ticker"] for p in brief["facts"]["positions"]] == [""]
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+@pytest.mark.parametrize("mode", ["disabled", "fallback", "model"])
+@pytest.mark.parametrize("roast", [False, True])
+def test_empty_portfolio_reaches_council_and_followups(client, model, monkeypatch, unreadable, mode, roast):
+    text = "I have no investments; I want to start saving"
+    model["value"] = {"surprise": True} if unreadable else _profile(
+        name=None, age=None, positions=[], cash=None, goals="start saving", horizon=None, risk=None)
+    response = client.post("/api/ingest/text", json={"text": text})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    brief = ingest.BRIEFS[body["brief_id"]]
+    assert brief["holdings"] == brief["facts"]["positions"] == []
+    assert brief["facts"]["holdings_value"] is brief["facts"]["cost_basis"] is None
+    assert brief["facts"]["winners"] is brief["facts"]["losers"] is None
+    assert "No holdings provided" in body["summary"]
+    assert "No holdings provided" in body["card"]["lines"]
+    assert f"Notes: {text}" in body["card"]["lines"]
+    assert text in brief["persona"]
+    assert json.loads(store._mem["brief", body["brief_id"]]) == brief
+    prompts, searches = [], []
+
+    async def complete(system, user, response_format=None):
+        prompts.append(user)
+        if mode == "fallback":
+            raise ValueError("model unavailable")
+        if "Stage 1, portfolio analysis." in system:
+            return {"headline": "Savings goal received", "analysis": "No holdings were provided.",
+                    "reasons": ["The user wants to start saving."], "names": ["TSLA"]}
+        return {"positions": [{"ticker": "TSLA", "signal": "BUY", "conviction": "low", "rationale": "x"}],
+                "advice": [{"action": "Discuss the savings goal", "why": "No holdings were provided."}]}
+
+    async def search(*args, **kwargs):
+        searches.append(args)
+        return []
+
+    async def failed_reply(*args):
+        raise ValueError("chat unavailable")
+
+    monkeypatch.setattr(llm, "complete_json", complete)
+    monkeypatch.setattr(llm, "complete_reply", failed_reply)
+    monkeypatch.setattr(council.prism, "kb_search", search)
+    if mode == "disabled":
+        monkeypatch.delenv("OPENAI_API_KEY")
+    run_id, events = run_council(client, body["brief_id"], roast=roast)
+    assert events[-1][0] == "run.done"
+    plans = [data for event, data in events if event == "orchestrator.plan"]
+    assert len(plans) == 5 and all(p["focus_tickers"] == p["shared_tickers"] == [] for p in plans)
+    verdicts = [data for event, data in events if event == "member.verdict"]
+    assert len(verdicts) == 5 and all(v["positions"] == v["names"] == [] for v in verdicts)
+    ruling = next(data for event, data in events if event == "chair.summary")
+    assert ruling["positions"] == [] and "No holdings were provided" in ruling["summary"]
+    assert searches == []
+    if mode == "disabled":
+        assert prompts == []
+    else:
+        assert prompts and all(text in p for p in prompts)
+    council.RUNS.pop(run_id)
+    for question in ("Everyone, how should I start saving?", "Who was most bullish?"):
+        chat = client.post("/api/council/chat", json={"run_id": run_id, "text": question, "roast": roast})
+        chat_events = parse_sse(chat.text)
+        assert chat_events[-1][0] == "run.done"
+        replies = [data["text"] for event, data in chat_events if event == "member.reply"]
+        assert replies and all("No holdings were provided" in reply for reply in replies)
+        assert next(data["suggestions"] for event, data in chat_events if event == "chat.closed")
+    ask = client.post("/api/council/ask", json={"run_id": run_id, "member": "buffett", "question": "How should I start?"})
+    assert parse_sse(ask.text)[-1][0] == "run.done"
 
 
 def test_ingest_text_accepts_suffixed_and_comma_numbers():
@@ -214,7 +318,7 @@ def test_ingest_text_is_traced_to_prism_without_personal_data(client, model, mon
     assert metadata["model"] == trace["model"] == llm.model()
     assert metadata["latency_ms"] >= 0
     assert metadata["success"] is (failure is None)
-    assert metadata["field_count"] == (0 if failure else 7)
+    assert metadata["field_count"] == (0 if failure else 8)
     assert metadata["position_field_count"] == (5 if failure is None else 0)
     assert len(spans["spans"]) == 1
     span = spans["spans"][0]

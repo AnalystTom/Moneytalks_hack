@@ -73,8 +73,8 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float | N
             value = shares * px
         cost = shares * basis if shares is not None and basis is not None else None
         rows.append({**h, "price": px, "value": value, "cost": cost})
-    value = sum(r["value"] for r in rows) if all(r["value"] is not None for r in rows) else None
-    cost = sum(r["cost"] for r in rows) if all(r["cost"] is not None for r in rows) else None
+    value = sum(r["value"] for r in rows) if rows and all(r["value"] is not None for r in rows) else None
+    cost = sum(r["cost"] for r in rows) if rows and all(r["cost"] is not None for r in rows) else None
     for r in rows:
         r["weight_pct"] = round(r["value"] / value * 100, 1) if value else (0.0 if value == 0 else None)
         r["pnl_pct"] = round((r["value"] - r["cost"]) / r["cost"] * 100, 1) if r["value"] is not None and r["cost"] else None
@@ -86,7 +86,7 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float | N
     for r in rows:
         if r["weight_pct"] is not None:
             sectors[r.get("sector", "Unknown")] = sectors.get(r.get("sector", "Unknown"), 0) + r["weight_pct"]
-    complete_pnl = all(r["pnl_pct"] is not None for r in rows)
+    complete_pnl = bool(rows) and all(r["pnl_pct"] is not None for r in rows)
     out = {
         "positions": rows,
         "holdings_value": round(value, 2) if value is not None else None,
@@ -129,7 +129,7 @@ async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, accou
     f = facts(holdings, last, broker_cash, net_worth)
     bank = await plaid.sandbox_balances() if use_plaid else None
     shown = ", ".join(tickers[:4]) + (f" +{len(tickers) - 4} more" if len(tickers) > 4 else "")
-    valuation = f"${f['holdings_value']:,.0f} in {shown}" if f["holdings_value"] is not None else f"{shown}: total valuation unavailable"
+    valuation = "No holdings provided" if not holdings else f"${f['holdings_value']:,.0f} in {shown}" if f["holdings_value"] is not None else f"{shown}: total valuation unavailable"
     profit = f"{f['unrealized_pl_pct']:+.0f}%" if f["unrealized_pl_pct"] is not None else "profit/loss unavailable"
     parts = [f"{valuation}, {profit}"]
     if broker_cash is not None:

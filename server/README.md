@@ -117,8 +117,10 @@ in the [web journey](../web/README.md#journey).
 ### Personal details
 
 `POST /api/ingest/text` accepts one JSON `text` string (1–4,000 characters). It needs `OPENAI_API_KEY`
-to extract a profile and at least one holding with a ticker and a share count or dollar amount.
-Request validation or rejected extraction returns 422; an unconfigured model returns 503;
+to extract a profile. Holdings may use the user's own labels without a recognized ticker or size;
+account totals stay in the original submitted notes rather than adding to asset values.
+An empty portfolio is supported, and unreadable extraction retains the submitted notes without inventing holdings.
+Request validation returns 422; an unconfigured model returns 503;
 model HTTP failures return 502. Extraction schemas and validation live in
 [`app/services/profile.py`](app/services/profile.py).
 

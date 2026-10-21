@@ -33,6 +33,11 @@ def plan(brief: dict) -> dict[str, Assignment]:
     """One assignment per member: 2-4 focus tickers and 2-3 questions about this user."""
     f = brief["facts"]
     pos = f["positions"]  # sorted by value, largest first
+    if not pos:
+        return {m: Assignment(focus_tickers=[], questions=[
+            "What do the user's notes say about their goals?",
+            "What information is needed before discussing investments?",
+        ]) for m in MEMBERS}
     by_gain = sorted((p for p in pos if p["pnl_pct"] is not None), key=lambda p: -p["pnl_pct"])
     by_loss = sorted((p for p in pos if p["pnl_pct"] is not None), key=lambda p: p["pnl_pct"])
     top = pos[0]
@@ -256,8 +261,11 @@ def suggestions(verdicts: dict[str, Verdict], brief: dict, names: list[NameRulin
         a = by("SELL") or list(split.calls)[0]
         b = by("BUY") if by("BUY") and by("BUY") != a else next(m for m, s in split.calls.items() if s != split.calls[a])
         out.append(f"{DISPLAY[a]} and {DISPLAY[b]} split on {split.ticker}. Settle it.")
-    top = brief["facts"]["positions"][0]["ticker"]
-    out.append(f"Michael, why worry about {top}?")
+    if brief["facts"]["positions"]:
+        top = brief["facts"]["positions"][0]["ticker"]
+        out.append(f"Michael, why worry about {top}?")
+    else:
+        out.append("What information does the council need?")
     out.append("What should I do with my savings?")
     return out[:3]
 
