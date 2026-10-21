@@ -66,7 +66,7 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float | N
     """Pre-computed portfolio facts so agents never do arithmetic."""
     rows = []
     for h in holdings:
-        px = prices.get(h["ticker"])
+        px = prices.get(h["ticker"]) if h["ticker"].strip() else h.get("price")
         shares, basis = h.get("shares"), h.get("cost_basis")
         value = h.get("amount")
         if value is None and shares is not None and px is not None:
@@ -93,12 +93,12 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float | N
         "cost_basis": round(cost, 2) if cost is not None else None,
         "unrealized_pl": round(value - cost, 2) if value is not None and cost is not None else None,
         "unrealized_pl_pct": round((value - cost) / cost * 100, 1) if value is not None and cost else None,
-        "top5": [f"{r['ticker']} {r['weight_pct']}%" if r["weight_pct"] is not None else f"{r['ticker']} (weight unavailable)" for r in rows[:5]],
+        "top5": [f"{r['ticker']} {r['weight_pct']}%" if r["weight_pct"] is not None else f"{r['ticker']} (weight unavailable)" for r in rows[:5] if r["ticker"].strip()],
         "sector_mix_pct": {k: round(v, 1) for k, v in sorted(sectors.items(), key=lambda kv: -kv[1])},
         "winners": sum(r["pnl_pct"] > 0 for r in rows) if complete_pnl else None,
         "losers": sum(r["pnl_pct"] < 0 for r in rows) if complete_pnl else None,
-        "best": max(rows, key=lambda r: r["pnl_pct"])["ticker"] if rows and complete_pnl else None,
-        "worst": min(rows, key=lambda r: r["pnl_pct"])["ticker"] if rows and complete_pnl else None,
+        "best": (max(rows, key=lambda r: r["pnl_pct"])["ticker"].strip() or None) if rows and complete_pnl else None,
+        "worst": (min(rows, key=lambda r: r["pnl_pct"])["ticker"].strip() or None) if rows and complete_pnl else None,
         "broker_cash": round(broker_cash, 2) if broker_cash is not None else None,
     }
     weighted = lambda k: sum(r[k] * r["value"] for r in rows) / value  # noqa: E731  exact weights, not rounded ones
@@ -120,15 +120,17 @@ def facts(holdings: list[dict], prices: dict[str, float], broker_cash: float | N
 async def build_brief(holdings: list[dict], persona: str, use_plaid: bool, account: dict | None = None, note: str = "",
                       *, prices: dict[str, float] | None = None, net_worth: float | None = None) -> tuple[str, str]:
     """Merge the sources into a stored brief; returns (brief_id, one-line summary)."""
-    tickers = [h["ticker"] for h in holdings]
-    last = prices if prices is not None else await market.prices(tickers, {h["ticker"]: h.get("price", h["cost_basis"]) for h in holdings})
-    last.update({h["ticker"]: h["price"] for h in holdings if h.get("price") is not None})
+    tickers = [h["ticker"] for h in holdings if h["ticker"].strip()]
+    last = prices if prices is not None else await market.prices(tickers, {h["ticker"]: h.get("price", h["cost_basis"]) for h in holdings if h["ticker"].strip()})
+    last.update({h["ticker"]: h["price"] for h in holdings if h["ticker"].strip() and h.get("price") is not None})
     broker_cash = (account or {}).get("cash")
     if broker_cash is not None:
         broker_cash = float(broker_cash)
     f = facts(holdings, last, broker_cash, net_worth)
     bank = await plaid.sandbox_balances() if use_plaid else None
     shown = ", ".join(tickers[:4]) + (f" +{len(tickers) - 4} more" if len(tickers) > 4 else "")
+    if unnamed := len(holdings) - len(tickers):
+        shown += (", " if shown else "") + f"{unnamed} unlabeled holdings"
     valuation = "No holdings provided" if not holdings else f"${f['holdings_value']:,.0f} in {shown}" if f["holdings_value"] is not None else f"{shown}: total valuation unavailable"
     profit = f"{f['unrealized_pl_pct']:+.0f}%" if f["unrealized_pl_pct"] is not None else "profit/loss unavailable"
     parts = [f"{valuation}, {profit}"]

@@ -184,11 +184,117 @@ def test_ingest_text_drops_invented_symbols_and_notes_without_blocking(client, m
 
 @pytest.mark.parametrize("label", ["", "  ", None])
 def test_ingest_text_does_not_name_unlabeled_positions(client, model, label):
-    model["value"] = _profile(positions=[{"ticker": label, "shares": 5, "cost_basis": None, "amount": None}])
-    response = client.post("/api/ingest/text", json={"text": "I own 5 shares"})
+    model["value"] = _profile(positions=[
+        {"ticker": label, "shares": 5, "cost_basis": 100, "amount": None},
+        {"ticker": label, "shares": 8, "cost_basis": 200, "amount": None},
+    ])
+    response = client.post("/api/ingest/text", json={"text": "Two unnamed investments: 5 shares bought at $100 and 8 at $200"})
     assert response.status_code == 200, response.text
     brief = ingest.BRIEFS[response.json()["brief_id"]]
-    assert [p["ticker"] for p in brief["facts"]["positions"]] == [""]
+    assert [(p["ticker"], p["shares"], p["cost_basis"]) for p in brief["facts"]["positions"]] == [("", 5, 100), ("", 8, 200)]
+    assert len(brief["holdings"]) == 2
+    assert "2 holdings — total valuation unavailable" in response.json()["card"]["lines"]
+    assert "5 shares, $100 cost basis per share" in response.json()["card"]["lines"]
+    assert "8 shares, $200 cost basis per share" in response.json()["card"]["lines"]
+    assert "2 unlabeled holdings" in brief["summary"]
+
+
+@pytest.mark.parametrize("named", [False, True])
+@pytest.mark.parametrize("mode", ["disabled", "fallback", "model"])
+def test_unnamed_holdings_are_not_researched_called_or_matched_in_chat(client, model, monkeypatch, named, mode):
+    text = "Two unnamed investments: 5 shares bought at $100 and 8 at $200"
+    positions = [{"ticker": "", "shares": 5, "cost_basis": 100, "amount": None},
+                 {"ticker": "  ", "shares": 8, "cost_basis": 200, "amount": None}]
+    if named:
+        text += "; 2 shares of AAPL at $50"
+        positions.append({"ticker": "AAPL", "shares": 2, "cost_basis": 50, "amount": None})
+    model["value"] = _profile(positions=positions)
+    body = client.post("/api/ingest/text", json={"text": text}).json()
+    searches = []
+
+    async def search(member, queries, emit, ticker=None, limit=2):
+        searches.append((queries, ticker))
+        return []
+
+    async def complete(system, user, response_format=None):
+        if mode == "fallback":
+            raise ValueError("model unavailable")
+        if "Do Job 1" in system:
+            return {m: {"focus_tickers": ["", "  ", "AAPL"], "questions": ["What is missing?"]}
+                    for m in ("buffett", "dalio", "burry", "leopold", "cramer")}
+        if "Stage 1, portfolio analysis." in system:
+            return {"headline": "Holdings received", "analysis": "Some holdings are unnamed.",
+                    "reasons": ["Names are missing."], "names": ["", "  ", "AAPL"]}
+        if "Stage 3, advice." in system:
+            return {"positions": [{"ticker": t, "signal": "HOLD", "conviction": "low", "rationale": "Needs research."}
+                                  for t in ("", "  ", "AAPL")],
+                    "advice": [{"action": "Provide missing names", "tickers": ["", "  "], "why": "Holdings are unnamed."}]}
+        return {}
+
+    async def failed_reply(*args):
+        raise ValueError("chat unavailable")
+
+    monkeypatch.setattr(council, "_search", search)
+    monkeypatch.setattr(llm, "complete_json", complete)
+    monkeypatch.setattr(llm, "complete_reply", failed_reply)
+    if mode == "disabled":
+        monkeypatch.delenv("OPENAI_API_KEY")
+    run_id, events = run_council(client, body["brief_id"])
+    assert events[-1][0] == "run.done"
+    expected = {"AAPL"} if named else set()
+    plans = [data for event, data in events if event == "orchestrator.plan"]
+    assert len(plans) == 5
+    assert all(set(p["focus_tickers"]) == set(p["shared_tickers"]) == expected for p in plans)
+    verdicts = [data for event, data in events if event == "member.verdict"]
+    assert len(verdicts) == 5
+    assert all(set(v["names"]) == expected for v in verdicts)
+    calls = expected if mode == "model" else set()
+    assert all({p["ticker"] for p in v["positions"]} == calls for v in verdicts)
+    assert all(t.strip() for v in verdicts for a in v["advice"] for t in a["tickers"])
+    ruling = next(data for event, data in events if event == "chair.summary")
+    assert {p["ticker"] for p in ruling["positions"]} == calls
+    if named:
+        assert "Michael, why worry about AAPL?" in ruling["suggestions"]
+        assert any(ticker == "AAPL" for _, ticker in searches)
+        assert all(ticker in (None, "AAPL") for _, ticker in searches)
+    else:
+        assert ruling["suggestions"] == ["What information does the council need?", "What should I do with my savings?"]
+        assert searches == []
+    council.RUNS.pop(run_id)
+    searches.clear()
+    for question in ("Hello there", "What is the latest news?"):
+        chat = client.post("/api/council/chat", json={"run_id": run_id, "text": question})
+        chat_events = parse_sse(chat.text)
+        assert chat_events[-1][0] == "run.done"
+        route = next(data for event, data in chat_events if event == "chat.routed")
+        assert route["members"] == ["buffett", "dalio"]
+    assert searches and all(ticker is None for _, ticker in searches)
+
+
+def test_ingest_unnamed_quotes_stay_with_their_own_records(client, monkeypatch):
+    queries = []
+
+    async def prices(tickers, fallback):
+        queries.append((tickers, fallback))
+        return {}
+
+    monkeypatch.setattr(ingest.market, "prices", prices)
+    portfolio = {"positions": [
+        {"symbol": "", "qty": 5, "avg_entry_price": 100, "current_price": 110},
+        {"symbol": "  ", "qty": 8, "avg_entry_price": 200, "current_price": 220},
+        {"symbol": "AAPL", "qty": 1, "avg_entry_price": 200, "current_price": 210},
+    ]}
+    response = client.post("/api/ingest", files={"portfolio": ("p.json", json.dumps(portfolio)), "persona": ("p.md", "")})
+    assert response.status_code == 200, response.text
+    brief = ingest.BRIEFS[response.json()["brief_id"]]
+    assert queries == [(["AAPL"], {"AAPL": 210})]
+    assert brief["prices"] == {"AAPL": 210}
+    facts = brief["facts"]
+    assert sorted((p["shares"], p["price"], p["value"]) for p in facts["positions"] if not p["ticker"]) == [(5, 110, 550), (8, 220, 1760)]
+    assert facts["holdings_value"] == 2520 and facts["cost_basis"] == 2300
+    assert facts["top5"] == ["AAPL 8.3%"]
+    assert facts["best"] is None and facts["worst"] == "AAPL"
+    assert "2 unlabeled holdings" in brief["summary"]
 
 
 @pytest.mark.parametrize("unreadable", [False, True])

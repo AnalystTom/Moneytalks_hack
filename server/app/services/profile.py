@@ -119,15 +119,15 @@ def sanitize(profile: Profile, text: str) -> Profile:
 
 
 def holdings(profile: Profile) -> list[dict]:
-    """One holding per ticker, retaining unknown totals and the supplied lots."""
+    """Consolidated named lots and separate unnamed holdings, retaining unknown totals."""
     grouped: dict[str, list[dict]] = {}
     for p in profile.positions:
         t = p.ticker.strip().upper()
         grouped.setdefault(t, []).append({**p.model_dump(), "ticker": t})
     out = []
     for t, lots in grouped.items():
-        if len(lots) == 1:
-            out.append(lots[0])
+        if not t or len(lots) == 1:
+            out.extend(lots)
             continue
         shares = sum(p["shares"] for p in lots) if all(p["shares"] is not None for p in lots) else None
         amount = sum(p["amount"] for p in lots) if all(p["amount"] is not None for p in lots) else None
@@ -141,8 +141,8 @@ def missing(profile: Profile) -> list[str]:
         ("name", profile.name), ("age", profile.age), ("cash", profile.cash), ("goals", profile.goals),
         ("investment horizon", profile.horizon), ("risk tolerance", profile.risk),
     ] if value is None]
-    gaps += [f"cost basis for {p.ticker.strip().upper()}" for p in profile.positions if p.cost_basis is None]
-    gaps += [f"share count for {p.ticker.strip().upper()}" for p in profile.positions if p.shares is None]
+    gaps += [f"cost basis for {p.ticker.strip().upper() or 'unlabeled holdings'}" for p in profile.positions if p.cost_basis is None]
+    gaps += [f"share count for {p.ticker.strip().upper() or 'unlabeled holdings'}" for p in profile.positions if p.shares is None]
     return list(dict.fromkeys(gaps))
 
 
@@ -172,7 +172,7 @@ def card(profile: Profile, f: dict, gaps: list[str]) -> dict:
             if lot.get("amount") is not None:
                 details.append(f"${lot['amount']:,.2f} reported amount")
             details.append(f"${lot['cost_basis']:g} cost basis per share" if lot["cost_basis"] is not None else "cost basis not given")
-            lines.append(f"{holding['ticker']}: " + ", ".join(details))
+            lines.append((f"{holding['ticker']}: " if holding["ticker"] else "") + ", ".join(details))
     if f["unrealized_pl_pct"] is None:
         lines.append("Profit/loss unavailable: current prices or cost basis not provided")
     if f.get("broker_cash") is not None:

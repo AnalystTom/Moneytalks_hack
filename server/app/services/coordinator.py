@@ -32,7 +32,7 @@ def _rank(positions: list[dict], pick, limit: int) -> list[str]:
 def plan(brief: dict) -> dict[str, Assignment]:
     """One assignment per member: 2-4 focus tickers and 2-3 questions about this user."""
     f = brief["facts"]
-    pos = f["positions"]  # sorted by value, largest first
+    pos = [p for p in f["positions"] if p["ticker"].strip()]
     if not pos:
         return {m: Assignment(focus_tickers=[], questions=[
             "What do the user's notes say about their goals?",
@@ -96,6 +96,7 @@ def merge_plan(canned: dict[str, Assignment], proposed: dict) -> dict[str, Assig
     for m in MEMBERS:
         try:
             a = Assignment(**{**proposed[m], "shared_tickers": canned[m].shared_tickers})
+            a.focus_tickers = [t.strip().upper() for t in a.focus_tickers if t.strip()]
             out[m] = a if a.focus_tickers and a.questions else canned[m]
         except (KeyError, TypeError, ValueError):
             out[m] = canned[m]
@@ -158,13 +159,15 @@ def check_calls(v: Verdict, held: list[str], names: list[str]) -> Verdict:
     """Calls only on held names the member researched, one per name; `high` needs a quoted source on that name."""
     seen, calls = set(), []
     for p in v.positions:
-        t = p.ticker.upper()
-        if t in seen or t not in held or t not in names:
+        t = p.ticker.strip().upper()
+        if not t or t in seen or t not in held or t not in names:
             continue
         seen.add(t)
         quoted = any(s.quote and s.ticker == t for s in v.sources)
         calls.append(p.model_copy(update={"ticker": t, "conviction": "mid" if p.conviction == "high" and not quoted else p.conviction}))
-    return v.model_copy(update={"positions": calls})
+    return v.model_copy(update={"positions": calls, "advice": [
+        a.model_copy(update={"tickers": [t for t in a.tickers if t.strip()]}) for a in v.advice
+    ]})
 
 
 # --- rule --------------------------------------------------------------------
@@ -174,11 +177,12 @@ def rule_names(verdicts: dict[str, Verdict], brief: dict) -> list[NameRuling]:
     """Per held name, from the members' calls:
     unanimous 3+ -> high; unanimous 2 -> mid (high if both high); one caller -> their conviction, capped at mid;
     a clear majority -> mid at 3+ callers, else low; a tie -> HOLD, low, "split"."""
-    weight = {p["ticker"]: p["weight_pct"] for p in brief["facts"]["positions"]}
+    weight = {p["ticker"]: p["weight_pct"] for p in brief["facts"]["positions"] if p["ticker"].strip()}
     calls: dict[str, dict[str, tuple[str, str]]] = {}
     for m, v in verdicts.items():
         for p in v.positions:
-            calls.setdefault(p.ticker, {})[m] = (p.signal, p.conviction)
+            if p.ticker in weight:
+                calls.setdefault(p.ticker, {})[m] = (p.signal, p.conviction)
     order = ["low", "mid", "high"]
     out = []
     for t, c in calls.items():
@@ -261,8 +265,7 @@ def suggestions(verdicts: dict[str, Verdict], brief: dict, names: list[NameRulin
         a = by("SELL") or list(split.calls)[0]
         b = by("BUY") if by("BUY") and by("BUY") != a else next(m for m, s in split.calls.items() if s != split.calls[a])
         out.append(f"{DISPLAY[a]} and {DISPLAY[b]} split on {split.ticker}. Settle it.")
-    if brief["facts"]["positions"]:
-        top = brief["facts"]["positions"][0]["ticker"]
+    if top := next((p["ticker"] for p in brief["facts"]["positions"] if p["ticker"].strip()), None):
         out.append(f"Michael, why worry about {top}?")
     else:
         out.append("What information does the council need?")
@@ -307,7 +310,7 @@ def route(text: str, to: list[str], verdicts: dict[str, Verdict], holdings: list
         return list(MEMBERS), "the whole council", False
     if named:
         return named[:MAX_SPEAKERS], "named in the question", False
-    tickers = [t for t in holdings if re.search(rf"\b{re.escape(t)}\b", text, re.I)]
+    tickers = [t for t in holdings if t.strip() and re.search(rf"\b{re.escape(t)}\b", text, re.I)]
     if tickers:
         t = tickers[0]
         bull = next((m for m, v in verdicts.items() if m != "burry" and any(p.ticker == t and p.signal == "BUY" for p in v.positions)), None)

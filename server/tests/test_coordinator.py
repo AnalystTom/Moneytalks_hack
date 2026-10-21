@@ -35,10 +35,12 @@ def test_tie_is_a_split_hold_and_majority_needs_three_callers_for_mid():
 def test_check_calls_keeps_researched_held_names_and_needs_a_quote_for_high():
     from app.models import Source
 
-    v = verdict(("AAA", "BUY", "high"), ("aaa", "SELL", "low"), ("BBB", "SELL", "high"), ("ZZZ", "BUY", "mid"), ("CCC", "BUY", "mid"))
+    v = verdict(("AAA", "BUY", "high"), ("aaa", "SELL", "low"), ("BBB", "SELL", "high"), ("ZZZ", "BUY", "mid"), ("CCC", "BUY", "mid"),
+                ("", "BUY", "high"), ("  ", "SELL", "low"))
     v = v.model_copy(update={"sources": [Source(title="t", url="u", quote="q", ticker="AAA")]})
-    out = coordinator.check_calls(v, held=["AAA", "BBB", "CCC"], names=["AAA", "BBB"])
+    out = coordinator.check_calls(v, held=["AAA", "BBB", "CCC", "", "  "], names=["AAA", "BBB", "", "  "])
     assert [(p.ticker, p.conviction) for p in out.positions] == [("AAA", "high"), ("BBB", "mid")]
+    assert {r.ticker for r in coordinator.rule_names({"buffett": v}, BRIEF)} == {"AAA", "BBB", "CCC"}
 
 
 def test_route():
@@ -47,6 +49,7 @@ def test_route():
     assert route("Is KO a bubble?") == ["burry", "buffett"]  # no BUY call on file: a non-AI name gets Warren
     assert route("NVDA thoughts?") == ["burry", "leopold"]
     assert route("Should I worry about inflation?") == ["dalio", "buffett"]
+    assert coordinator.route("Hello there", [], {}, ["", "  ", "NVDA"]) == (["buffett", "dalio"], "general question", False)
 
 
 def test_numbers_parse_signed_dollars_and_tags_are_stripped():
