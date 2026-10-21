@@ -930,6 +930,7 @@ export default function App() {
               />
               {busy ? (
                 <button
+                  key="cancel"
                   type="button"
                   className="cancel-send"
                   aria-label="Cancel session"
@@ -943,7 +944,9 @@ export default function App() {
                   ■
                 </button>
               ) : (
+                // Distinct key: sharing the cancel button's DOM node turns it into a submit button mid-click and resends the message.
                 <button
+                  key="send"
                   className="send-message"
                   aria-label="Send message"
                   disabled={
