@@ -7,6 +7,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 from fastapi.testclient import TestClient
+from starlette.responses import JSONResponse
 import httpx
 import pytest
 
@@ -21,6 +22,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
     workers = ModuleType("workers")
     workers.DurableObject = type("DurableObject", (), {})
     workers.WorkerEntrypoint = type("WorkerEntrypoint", (), {})
+    workers.Response = SimpleNamespace(json=lambda data, status=200, headers=None: JSONResponse(data, status_code=status, headers=headers))
     monkeypatch.setitem(sys.modules, "workers", workers)
 
     async def fetch(app, request, env):
@@ -42,10 +44,19 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
     if origin:
         bindings["CORS_ORIGINS"] = origin
     council = worker.Council()
+    bindings["SPEECH_DAILY_REQUEST_LIMIT"] = "12"
     council.env = SimpleNamespace(**bindings)
+    class Storage:
+        value = None
+        async def get(self, key):
+            return self.value
+        async def put(self, key, value):
+            self.value = value
+    storage = Storage()
+    council.ctx = SimpleNamespace(storage=storage)
 
     async def request(method, url, **kwargs):
-        return await council.fetch(SimpleNamespace(js_object={"method": method, "url": url, **kwargs}))
+        return await council.fetch(SimpleNamespace(method=method, url=url, js_object={"method": method, "url": url, **kwargs}))
 
     response = await request("GET", "/api/health")
     assert response.status_code == 200
@@ -71,7 +82,7 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(
         transport=httpx.MockTransport(speak), **kwargs,
     ))
-    for member in ("buffett", "cramer", "burry", "leopold"):
+    for member in ("buffett", "dalio", "burry", "leopold", "cramer", "chair"):
         for method in ("GET", "POST"):
             payload = {"member": member, "text": "hello"}
             response = await request(method, "/api/voice/speak", **{
@@ -81,6 +92,20 @@ async def test_worker_initializes_configuration(monkeypatch, origin):
             assert calls[-1].url.path.endswith(f"/voice-{member}")
             assert calls[-1].headers["xi-api-key"] == "voice-key"
             assert json.loads(calls[-1].content)["model_id"] == "custom-model"
+
+    before = len(calls)
+    # A new object instance must retain the shared GET/POST allowance.
+    council = worker.Council()
+    council.env = SimpleNamespace(**bindings)
+    council.ctx = SimpleNamespace(storage=storage)
+    exhausted = await request("GET", "/api/voice/speak", params={"member": "burry", "text": "no more"})
+    assert exhausted.status_code == 429
+    encoded = await request("GET", "/api/voice/%73peak", params={"member": "burry", "text": "no bypass"})
+    assert encoded.status_code == 429
+    assert len(calls) == before
+    storage.value = "2000-01-01|8"
+    renewed = await request("POST", "/api/voice/speak", json={"member": "burry", "text": "new day"})
+    assert renewed.status_code == 200
 
 
 @pytest.fixture
