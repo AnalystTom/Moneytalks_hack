@@ -42,6 +42,13 @@ Public URL: https://council.thomasmann2001.workers.dev. `deploy.sh` is the redep
 so settings such as CORS are available during app construction; add new consumed env names there.
 Non-Python data the app reads at runtime (`council/*.md`) is bundled via `rules` in `wrangler.jsonc`.
 
+### Speech allowance
+
+The Cloudflare Worker reserves a shared durable allowance before every GET/POST `/api/voice/speak` attempt.
+`SPEECH_DAILY_REQUEST_LIMIT` defaults to 10 requests per UTC day across all visitors; zero disables speech,
+and valid limits are 0–1000. Failed or invalid attempts count. The allowance survives eviction and redeploy.
+Transcription and council-model usage are not covered. Local Uvicorn does not apply this Worker gate.
+
 ### D1 database
 
 `wrangler.jsonc` binds the D1 database `council` as `DB`, available inside the Durable Object as `self.env.DB`.
