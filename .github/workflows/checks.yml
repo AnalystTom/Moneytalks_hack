@@ -2,7 +2,7 @@ name: Checks
 on: [push, pull_request]
 jobs:
   web:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'big-machine-linux' }}
     defaults:
       run:
         working-directory: web
@@ -20,7 +20,7 @@ jobs:
       - run: npm test
       - run: npm run build
   server:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'big-machine-linux' }}
     defaults:
       run:
         working-directory: server
